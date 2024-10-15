@@ -40,7 +40,7 @@ def main():
     # Install dependencies if not already installed
     install_dependencies()
     # Set up auto-start on login using cron
-    setup_auto_start()
+    # setup_auto_start()
     # Capture Wi-Fi traffic data
     capture_wifi_traffic()
 
