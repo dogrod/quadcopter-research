@@ -28,7 +28,7 @@ def capture_wifi_traffic():
     # Define the network interface to capture from (e.g., wlan0)
     interface = 'wlan0'
     # Define the output file for storing the captured data
-    pcap_file = '/home/pi/wifi_traffic.pcap'
+    pcap_file = '/home/brian/pi/wifi_traffic.pcap'
 
     # Start the packet capture using tshark
     try:
