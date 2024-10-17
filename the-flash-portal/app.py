@@ -31,7 +31,7 @@ def start_wifi_capture():
     global wifi_monitoring
     capture = pyshark.LiveCapture(
         interface=WIFI_INTERFACE,
-        display_filter=f"ip.addr == {DRONE_IP}",
+        # display_filter=f"ip.addr == {DRONE_IP}",
     )
     for packet in capture.sniff_continuously():
         if not wifi_monitoring:
