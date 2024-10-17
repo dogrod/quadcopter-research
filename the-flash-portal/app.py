@@ -22,9 +22,9 @@ MAVLINK_CONNECTION_STRING = "udpout:127.0.0.1:14550"
 
 # Function to toggle monitor mode
 def set_monitor_mode(interface, mode="monitor"):
-    subprocess.run(["/sbin/ifconfig", interface, "down"])
-    subprocess.run(["/sbin/iwconfig", interface, "mode", mode])
-    subprocess.run(["/sbin/ifconfig", interface, "up"])
+    subprocess.run(["sudo", "/sbin/ifconfig", interface, "down"])
+    subprocess.run(["sudo", "/sbin/iwconfig", interface, "mode", mode])
+    subprocess.run(["sudo", "/sbin/ifconfig", interface, "up"])
 
 # Wi-Fi packet processing
 def start_wifi_capture():
