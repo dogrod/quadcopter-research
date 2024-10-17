@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>MAVLink Monitor</h1>
+<button id="toggle-mavlink">Start MAVLink Listener</button>
+<div id="status"></div>
+<table id="messages">
+    <tr>
+        <th>Message Type</th>
+        <th>Content</th>
+    </tr>
+</table>
+<script>
+    var socket = io('/mavlink');
+    var running = false;
+
+    socket.on('connect', function() {
+        console.log('Connected to MAVLink namespace');
+    });
+
+    socket.on('mavlink_status', function(data) {
+        running = data.running;
+        updateButton();
+    });
+
+    socket.on('mavlink_message', function(data) {
+        var table = document.getElementById('messages');
+        var row = table.insertRow(1);
+        row.insertCell(0).innerHTML = data.message_type;
+        row.insertCell(1).innerHTML = JSON.stringify(data.content);
+    });
+
+    document.getElementById('toggle-mavlink').addEventListener('click', function() {
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', '{{ url_for("toggle_mavlink") }}', true);
+        xhr.send();
+        running = !running;
+        updateButton();
+    });
+
+    function updateButton() {
+        var button = document.getElementById('toggle-mavlink');
+        button.textContent = running ? 'Stop MAVLink Listener' : 'Start MAVLink Listener';
+        document.getElementById('status').textContent = running ? 'Listening...' : 'Not Listening';
+    }
+</script>
+{% endblock %}

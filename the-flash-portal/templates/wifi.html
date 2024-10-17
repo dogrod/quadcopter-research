@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Wi-Fi Monitor</h1>
+<button id="toggle-monitor">Open Monitor Mode</button>
+<div id="status"></div>
+<table id="packets">
+    <tr>
+        <th>Source IP</th>
+        <th>Destination IP</th>
+        <th>Protocol</th>
+        <th>Info</th>
+    </tr>
+</table>
+<script>
+    var socket = io('/wifi');
+    var monitoring = false;
+
+    socket.on('connect', function() {
+        console.log('Connected to Wi-Fi namespace');
+    });
+
+    socket.on('wifi_status', function(data) {
+        monitoring = data.monitoring;
+        updateButton();
+    });
+
+    socket.on('wifi_packet', function(data) {
+        var table = document.getElementById('packets');
+        var row = table.insertRow(1);
+        row.insertCell(0).innerHTML = data.source_ip;
+        row.insertCell(1).innerHTML = data.destination_ip;
+        row.insertCell(2).innerHTML = data.protocol;
+        row.insertCell(3).innerHTML = data.info;
+    });
+
+    document.getElementById('toggle-monitor').addEventListener('click', function() {
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', '{{ url_for("toggle_wifi_monitor") }}', true);
+        xhr.send();
+        monitoring = !monitoring;
+        updateButton();
+    });
+
+    function updateButton() {
+        var button = document.getElementById('toggle-monitor');
+        button.textContent = monitoring ? 'Close Monitor Mode' : 'Open Monitor Mode';
+        document.getElementById('status').textContent = monitoring ? 'Monitoring...' : 'Not Monitoring';
+    }
+</script>
+{% endblock %}
