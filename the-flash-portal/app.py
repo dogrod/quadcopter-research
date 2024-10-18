@@ -1,7 +1,7 @@
-import threading
 import subprocess
-
 import pyshark
+
+from threading import Thread, Event
 from flask import Flask, render_template
 from flask_socketio import SocketIO, emit
 from pymavlink import mavutil
@@ -14,17 +14,12 @@ wifi_capture_thread = None
 mavlink_thread = None
 wifi_monitoring = False
 mavlink_running = False
+stop_capture_event = Event()
 
 # Configuration
 WIFI_INTERFACE = "wlan0"
 DRONE_IP = "192.168.1.1"
 MAVLINK_CONNECTION_STRING = "udpout:127.0.0.1:14550"
-
-# Function to toggle monitor mode
-def set_monitor_mode(interface, mode="monitor"):
-    subprocess.run(["sudo", "/sbin/ifconfig", interface, "down"])
-    subprocess.run(["sudo", "/sbin/iwconfig", interface, "mode", mode])
-    subprocess.run(["sudo", "/sbin/ifconfig", interface, "up"])
 
 # Wi-Fi packet processing
 def start_wifi_capture():
@@ -34,20 +29,22 @@ def start_wifi_capture():
         # display_filter=f"ip.addr == {DRONE_IP}",
     )
     for packet in capture.sniff_continuously():
-        if not wifi_monitoring:
+        if stop_capture_event.is_set():
             break
         try:
             data = {
                 "source": packet.ip.src,
                 "destination": packet.ip.dst,
                 "protocol": packet.transport_layer,
-                "info": packet.info,
+                "info": str(packet),
                 "length": packet.length,
             }
+            socketio.emit("wifi_packet", data, namespace="/wifi")
             print(data)
         except AttributeError:
             # Some packets may not have IP layer
             continue
+    capture.close()
 
 # MAVLink message processing
 def mavlink_listener():
@@ -86,17 +83,18 @@ def mavlink_tab():
 
 @app.route("/toggle_wifi_monitoring", methods=["POST"])
 def toggle_wifi_monitor():
-    global wifi_monitoring, wifi_capture_thread
+    global wifi_monitoring, wifi_capture_thread, stop_capture_event
 
     if wifi_monitoring:
         # Stop Wi-Fi monitoring
+        stop_capture_event.set()
+        wifi_capture_thread.join()
         wifi_monitoring = False
-        set_monitor_mode(WIFI_INTERFACE, mode="managed")
     else:
         # Start Wi-Fi monitoring
+        stop_capture_event.clear()
         wifi_monitoring = True
-        set_monitor_mode(WIFI_INTERFACE, mode="monitor")
-        wifi_capture_thread = threading.Thread(target=start_wifi_capture)
+        wifi_capture_thread = Thread(target=start_wifi_capture)
         wifi_capture_thread.start()
 
     return ("", 204)
@@ -108,7 +106,7 @@ def toggle_mavlink():
         mavlink_running = False
     else:
         mavlink_running = True
-        mavlink_thread = threading.Thread(target=mavlink_listener)
+        mavlink_thread = Thread(target=mavlink_listener)
         mavlink_thread.start()
     return ('', 204)
 

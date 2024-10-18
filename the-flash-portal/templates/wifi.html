@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>Wi-Fi Monitor</h1>
-<button id="toggle-monitor">Open Monitor Mode</button>
+<button id="toggle-monitor">Start Wi-Fi Monitoring</button>
 <div id="status"></div>
 <table id="packets">
     <tr>
@@ -43,7 +43,7 @@
 
     function updateButton() {
         var button = document.getElementById('toggle-monitor');
-        button.textContent = monitoring ? 'Close Monitor Mode' : 'Open Monitor Mode';
+        button.textContent = monitoring ? 'Stop Wi-Fi Monitoring' : 'Start Wi-Fi Monitoring';
         document.getElementById('status').textContent = monitoring ? 'Monitoring...' : 'Not Monitoring';
     }
 </script>
