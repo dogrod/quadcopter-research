@@ -12,7 +12,9 @@
     </tr>
 </table>
 <script>
-    var socket = io('/wifi');
+    localStorage.debug = '*';
+
+    var socket = io('/wifi', { transports: ['websocket'] });
     var monitoring = false;
 
     socket.on('connect', function() {
@@ -20,6 +22,7 @@
     });
 
     socket.on('wifi_status', function(data) {
+        console.log('Received wifi_status event:', data);
         monitoring = data.monitoring;
         updateButton();
     });
