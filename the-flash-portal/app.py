@@ -7,7 +7,7 @@ from flask_socketio import SocketIO, emit
 from pymavlink import mavutil
 
 app = Flask(__name__)
-socketio = SocketIO(app, async_mode="eventlet", cors_allowed_origins="*", logger=True, engineio_logger=True)
+socketio = SocketIO(app, async_mode="threading", cors_allowed_origins="*", logger=True, engineio_logger=True)
 
 # Global variables
 wifi_capture_thread = None
@@ -40,7 +40,7 @@ def start_wifi_capture():
                 "length": packet.length,
             }
             print(f"Emitting wifi_packet event: {data}")
-            socketio.emit("wifi_packet", data, namespace="/wifi", broadcast=True)
+            socketio.emit("wifi_packet", data, namespace="/wifi")
         except AttributeError:
             # Some packets may not have IP layer
             continue
