@@ -33,23 +33,28 @@ def start_wifi_capture():
 
     print("Started Wi-Fi capture with filter:", display_filter)
 
-    for packet in capture.sniff_continuously():
-        if stop_capture_event.is_set():
-            break
-        try:
-            data = {
-                "source_ip": packet.ip.src,
-                "destination_ip": packet.ip.dst,
-                "protocol": packet.transport_layer,
-                # "info": str(packet),
-                "length": packet.length,
-            }
-            print(f"Emitting wifi_packet event: {data}")
-            socketio.emit("wifi_packet", data, namespace="/wifi")
-        except AttributeError:
-            # Some packets may not have IP layer
-            continue
-    capture.close()
+    try:
+        for packet in capture.sniff_continuously():
+            if stop_capture_event.is_set():
+                break
+            try:
+                data = {
+                    "source_ip": packet.ip.src,
+                    "destination_ip": packet.ip.dst,
+                    "protocol": packet.transport_layer,
+                    # "info": str(packet),
+                    "length": packet.length,
+                }
+                print(f"Emitting wifi_packet event: {data}")
+                socketio.emit("wifi_packet", data, namespace="/wifi")
+            except AttributeError:
+                # Some packets may not have IP layer
+                continue
+    except Exception as e:
+        print(f"Error during packet capture: {e}")
+        socketio.emit('error', {'message': str(e)}, namespace='/wifi')
+    finally:
+        capture.close()
 
 # MAVLink message processing
 def mavlink_listener():
@@ -105,8 +110,7 @@ def toggle_wifi_monitor():
         display_filter = data.get('display_filter', '')
         print(f"Received display filter: '{display_filter}'")
         # Start the packet capture in a new thread with application context
-        thread = Thread(target=lambda: socketio.run_with_context(start_wifi_capture()))
-        thread.start()
+        socketio.start_background_task(start_wifi_capture)
     return ("", 204)
 
 @app.route('/toggle_mavlink', methods=['POST'])
