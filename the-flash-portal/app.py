@@ -14,7 +14,6 @@ mavlink_thread = None
 wifi_monitoring = False
 mavlink_running = False
 stop_capture_event = Event()
-display_filter = ''
 
 # Configuration
 WIFI_INTERFACE = "wlan0"
@@ -23,17 +22,10 @@ MAVLINK_CONNECTION_STRING = "udpout:127.0.0.1:14550"
 
 # Wi-Fi packet processing
 def start_wifi_capture():
-    global display_filter
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     pcap_filename = f'/tmp/ap_traffic_{timestamp}.pcap'
 
-    print(f"Started Wi-Fi capture with filter: '{display_filter}'")
-
-    if display_filter.strip() == '':
-        # No display filter provided
-        capture = pyshark.LiveCapture(interface=WIFI_INTERFACE, output_file=pcap_filename)
-    else:
-        capture = pyshark.LiveCapture(interface=WIFI_INTERFACE, display_filter=display_filter, output_file=pcap_filename)
+    capture = pyshark.LiveCapture(interface=WIFI_INTERFACE, output_file=pcap_filename)
 
     try:
         for packet in capture.sniff_continuously():
@@ -98,7 +90,7 @@ def mavlink_tab():
 
 @app.route("/toggle_wifi_monitoring", methods=["POST"])
 def toggle_wifi_monitor():
-    global wifi_monitoring, stop_capture_event, display_filter
+    global wifi_monitoring, stop_capture_event
 
     if wifi_monitoring:
         # Stop Wi-Fi monitoring
@@ -110,10 +102,6 @@ def toggle_wifi_monitor():
         print("Starting Wi-Fi monitoring...")
         stop_capture_event.clear()
         wifi_monitoring = True
-        # Get the display filter from the request
-        data = request.get_json()
-        display_filter = data.get('display_filter', '')
-        print(f"Received display filter: '{display_filter}'")
         # Start the packet capture in a new thread with application context
         socketio.start_background_task(start_wifi_capture)
     return ("", 204)
