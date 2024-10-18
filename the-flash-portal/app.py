@@ -2,7 +2,7 @@ import subprocess
 import pyshark
 
 from threading import Thread, Event
-from flask import Flask, render_template, request, copy_current_app_context
+from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit
 from pymavlink import mavutil
 
@@ -10,7 +10,6 @@ app = Flask(__name__)
 socketio = SocketIO(app, async_mode="threading", cors_allowed_origins="*", logger=True, engineio_logger=True)
 
 # Global variables
-wifi_capture_thread = None
 mavlink_thread = None
 wifi_monitoring = False
 mavlink_running = False
@@ -23,9 +22,8 @@ DRONE_IP = "192.168.1.1"
 MAVLINK_CONNECTION_STRING = "udpout:127.0.0.1:14550"
 
 # Wi-Fi packet processing
-@copy_current_app_context
 def start_wifi_capture():
-    global wifi_monitoring, display_filter
+    global display_filter
 
     if display_filter.strip() == '':
         # No display filter provided
@@ -90,20 +88,25 @@ def mavlink_tab():
 
 @app.route("/toggle_wifi_monitoring", methods=["POST"])
 def toggle_wifi_monitor():
-    global wifi_monitoring, wifi_capture_thread, stop_capture_event
+    global wifi_monitoring, stop_capture_event, display_filter
 
     if wifi_monitoring:
         # Stop Wi-Fi monitoring
+        print("Stopping Wi-Fi monitoring...")
         stop_capture_event.set()
-        wifi_capture_thread.join()
         wifi_monitoring = False
     else:
         # Start Wi-Fi monitoring
+        print("Starting Wi-Fi monitoring...")
         stop_capture_event.clear()
         wifi_monitoring = True
-        wifi_capture_thread = Thread(target=start_wifi_capture)
-        wifi_capture_thread.start()
-
+        # Get the display filter from the request
+        data = request.get_json()
+        display_filter = data.get('display_filter', '')
+        print(f"Received display filter: '{display_filter}'")
+        # Start the packet capture in a new thread with application context
+        thread = Thread(target=lambda: socketio.run_with_context(start_wifi_capture()))
+        thread.start()
     return ("", 204)
 
 @app.route('/toggle_mavlink', methods=['POST'])
