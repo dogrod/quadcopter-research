@@ -1,46 +1,96 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>MAVLink Monitor</h1>
+<div>
+    <label for="connection-string">MAVLink Connection String:</label>
+    <input type="text" id="connection-string" value="/dev/serial0">
+</div>
 <button id="toggle-mavlink">Start MAVLink Listener</button>
-<div id="status"></div>
-<table id="messages">
+<div id="status">Not Monitoring</div>
+<div id="messages"></div>
+<table id="mavlink-messages">
     <tr>
         <th>Message Type</th>
         <th>Content</th>
     </tr>
 </table>
 <script>
-    var socket = io('/mavlink');
-    var running = false;
+    localStorage.debug = '*';
+
+    var socket = io('/mavlink', { transports: ['websocket'] });
+    var monitoring = false;
 
     socket.on('connect', function() {
         console.log('Connected to MAVLink namespace');
     });
 
     socket.on('mavlink_status', function(data) {
-        running = data.running;
+        monitoring = (data.status === 'Connected');
         updateButton();
     });
 
     socket.on('mavlink_message', function(data) {
-        var table = document.getElementById('messages');
-        var row = table.insertRow(1);
-        row.insertCell(0).innerHTML = data.message_type;
-        row.insertCell(1).innerHTML = JSON.stringify(data.content);
+        console.log('Received MAVLink message:', data);
+
+        var table = document.getElementById('mavlink-messages');
+        var row = table.insertRow(-1);
+        row.insertCell(0).innerHTML = data.msg;
+        row.insertCell(1).innerHTML = JSON.stringify(data, null, 2);
+    });
+
+    socket.on('mavlink_error', function(data) {
+        displayMessage('Error: ' + data.message, true);
+    });
+
+    socket.on('mavlink_status', function(data) {
+        displayMessage('MAVLink Status: ' + data.status);
     });
 
     document.getElementById('toggle-mavlink').addEventListener('click', function() {
+        var connectionString = document.getElementById('connection-string').value;
+        if (!connectionString) {
+            displayMessage('Please enter a MAVLink connection string.', true);
+            return;
+        }
+
         var xhr = new XMLHttpRequest();
-        xhr.open('POST', '{{ url_for("toggle_mavlink") }}', true);
-        xhr.send();
-        running = !running;
+        xhr.open('POST', '/toggle_mavlink_monitor', true);
+        xhr.setRequestHeader('Content-Type', 'application/json;charset=UTF-8');
+        xhr.send(JSON.stringify({ 'connection_string': connectionString }));
+
+        monitoring = !monitoring;
         updateButton();
+        clearMavlinkMessages();
+
+        if (monitoring) {
+            displayMessage('MAVLink Monitoring Started.');
+        } else {
+            displayMessage('MAVLink Monitoring Stopped.');
+        }
     });
 
     function updateButton() {
         var button = document.getElementById('toggle-mavlink');
-        button.textContent = running ? 'Stop MAVLink Listener' : 'Start MAVLink Listener';
-        document.getElementById('status').textContent = running ? 'Listening...' : 'Not Listening';
+        button.textContent = monitoring ? 'Stop MAVLink Listener' : 'Start MAVLink Listener';
+        document.getElementById('status').textContent = monitoring ? 'Listening...' : 'Not Listening';
+    }
+
+    function displayMessage(message, isError=false) {
+        var messages = document.getElementById('messages');
+        var msg = document.createElement('p');
+        msg.textContent = message;
+        if (isError) {
+            msg.classList.add('error');
+        }
+        messages.appendChild(msg);
+    }
+
+    function clearMavlinkMessages() {
+        var table = document.getElementById('mavlink-messages');
+        // Remove all rows except the header
+        while(table.rows.length > 1) {
+            table.deleteRow(1);
+        }
     }
 </script>
 {% endblock %}

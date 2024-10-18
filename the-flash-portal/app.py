@@ -10,15 +10,17 @@ app = Flask(__name__)
 socketio = SocketIO(app, async_mode="threading", cors_allowed_origins="*", logger=True, engineio_logger=True)
 
 # Global variables
-mavlink_thread = None
+# Wi-Fi
 wifi_monitoring = False
-mavlink_running = False
 stop_capture_event = Event()
+
+# MAVLink
+mavlink_connection = None
+mavlink_thread = None
+mavlink_stop_event = Event()
 
 # Configuration
 WIFI_INTERFACE = "wlan0"
-DRONE_IP = "192.168.1.1"
-MAVLINK_CONNECTION_STRING = "udpout:127.0.0.1:14550"
 
 # Wi-Fi packet processing
 def start_wifi_capture():
@@ -54,26 +56,36 @@ def start_wifi_capture():
         socketio.emit('capture_saved', {'filename': pcap_filename}, namespace='/wifi')
 
 # MAVLink message processing
-def mavlink_listener():
-    global mavlink_running
-    master = mavutil.mavlink_connection(MAVLINK_CONNECTION_STRING)
-    master.wait_heartbeat()
-    print("Heartbeat from drone:", master.target_system, master.target_component)
+def mavlink_listener(connection_string):
+    global mavlink_connection
 
-    while mavlink_running:
-        try:
-            msg = master.recv_match(type="ALL", blocking=True, timeout=1)
+    try:
+        # Establish MAVLink connection
+        mavlink_connection = mavutil.mavlink_connection(connection_string)
+        print(f"Established MAVLink connection to {connection_string}")
+        
+        # Wait for heartbeat to ensure connection is established
+        mavlink_connection.wait_heartbeat()
+        print("Heartbeat received. Connection successful.", mavlink_connection.target_system, mavlink_connection.target_component)
+        socketio.emit('mavlink_status', {'status': 'Connected'}, namespace='/mavlink')
+        
+        while not mavlink_stop_event.is_set():
+            # Listen for MAVLink messages
+            msg = mavlink_connection.recv_match(blocking=False)
             if msg:
-                print(msg)
+                # Convert message to dictionary
+                msg_dict = msg.to_dict()
+                # Emit MAVLink message to client
+                socketio.emit('mavlink_message', msg_dict, namespace='/mavlink')
 
-                data = {
-                    "message_type": msg.get_type(),
-                    "content": msg.to_dict(),
-                }
-                socketio.emit("mavlink_message", data, namespace="/mavlink")
-        except Exception as e:
-            print(f"Error in mavlink listener: {e}")
-            continue
+    except Exception as e:
+        print(f"Error in MAVLink listener: {e}")
+        socketio.emit('mavlink_error', {'message': str(e)}, namespace='/mavlink')
+    finally:
+        if mavlink_connection:
+            mavlink_connection.close()
+            print("MAVLink connection closed.")
+            socketio.emit('mavlink_status', {'status': 'Disconnected'}, namespace='/mavlink')
 
 # Routes
 @app.route("/")
@@ -106,14 +118,24 @@ def toggle_wifi_monitor():
         socketio.start_background_task(start_wifi_capture)
     return ("", 204)
 
-@app.route('/toggle_mavlink', methods=['POST'])
-def toggle_mavlink():
-    global mavlink_running, mavlink_thread
-    if mavlink_running:
-        mavlink_running = False
+@app.route('/toggle_mavlink_monitor', methods=['POST'])
+def toggle_mavlink_monitor():
+    global mavlink_thread, mavlink_stop_event
+    if mavlink_thread and mavlink_thread.is_alive():
+        # Stop MAVLink monitoring
+        print("Stopping MAVLink monitoring...")
+        mavlink_stop_event.set()
+        mavlink_thread.join()
+        mavlink_thread = None
+        mavlink_stop_event.clear()
     else:
-        mavlink_running = True
-        mavlink_thread = Thread(target=mavlink_listener)
+        # Start MAVLink monitoring
+        data = request.get_json()
+        connection_string = data.get('connection_string', '').strip()
+        if not connection_string:
+            return ('Connection string is required', 400)
+        print(f"Starting MAVLink monitoring with connection string: {connection_string}")
+        mavlink_thread = Thread(target=mavlink_listener, args=(connection_string,))
         mavlink_thread.start()
     return ('', 204)
 
@@ -126,7 +148,8 @@ def wifi_connect():
 @socketio.on("connect", namespace="/mavlink")
 def mavlink_connect():
     print("MAVLink client connected")
-    emit("mavlink_status", {"running": mavlink_running})
+    status = 'Connected' if mavlink_thread and mavlink_thread.is_alive() else 'Disconnected'
+    emit('mavlink_status', {'status': status})
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5001)
