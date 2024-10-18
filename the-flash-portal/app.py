@@ -33,8 +33,8 @@ def start_wifi_capture():
             break
         try:
             data = {
-                "source": packet.ip.src,
-                "destination": packet.ip.dst,
+                "source_ip": packet.ip.src,
+                "destination_ip": packet.ip.dst,
                 "protocol": packet.transport_layer,
                 # "info": str(packet),
                 "length": packet.length,
