@@ -2,7 +2,7 @@ import subprocess
 import pyshark
 
 from threading import Thread, Event
-from flask import Flask, render_template
+from flask import Flask, render_template, request, copy_current_app_context
 from flask_socketio import SocketIO, emit
 from pymavlink import mavutil
 
@@ -15,6 +15,7 @@ mavlink_thread = None
 wifi_monitoring = False
 mavlink_running = False
 stop_capture_event = Event()
+display_filter = ''
 
 # Configuration
 WIFI_INTERFACE = "wlan0"
@@ -22,12 +23,18 @@ DRONE_IP = "192.168.1.1"
 MAVLINK_CONNECTION_STRING = "udpout:127.0.0.1:14550"
 
 # Wi-Fi packet processing
+@copy_current_app_context
 def start_wifi_capture():
-    global wifi_monitoring
-    capture = pyshark.LiveCapture(
-        interface=WIFI_INTERFACE,
-        # display_filter=f"ip.addr == {DRONE_IP}",
-    )
+    global wifi_monitoring, display_filter
+
+    if display_filter.strip() == '':
+        # No display filter provided
+        capture = pyshark.LiveCapture(interface=WIFI_INTERFACE)
+    else:
+        capture = pyshark.LiveCapture(interface=WIFI_INTERFACE, display_filter=display_filter)
+
+    print("Started Wi-Fi capture with filter:", display_filter)
+
     for packet in capture.sniff_continuously():
         if stop_capture_event.is_set():
             break

@@ -1,6 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>Wi-Fi Monitor</h1>
+<div>
+    <label for="display-filter">Display Filter:</label>
+    <input type="text" id="display-filter" value="ip.addr == 192.168.4.3">
+</div>
 <button id="toggle-monitor">Start Wi-Fi Monitoring</button>
 <div id="status"></div>
 <table id="packets">
@@ -38,9 +42,12 @@
     });
 
     document.getElementById('toggle-monitor').addEventListener('click', function() {
+        var displayFilter = document.getElementById('display-filter').value;
         var xhr = new XMLHttpRequest();
+
         xhr.open('POST', '{{ url_for("toggle_wifi_monitor") }}', true);
-        xhr.send();
+        xhr.setRequestHeader('Content-Type', 'application/json;charset=UTF-8');
+        xhr.send(JSON.stringify({ 'display_filter': displayFilter }));
         monitoring = !monitoring;
         updateButton();
     });
