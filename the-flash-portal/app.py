@@ -36,11 +36,11 @@ def start_wifi_capture():
                 "source": packet.ip.src,
                 "destination": packet.ip.dst,
                 "protocol": packet.transport_layer,
-                "info": str(packet),
+                # "info": str(packet),
                 "length": packet.length,
             }
+            print(f"Emitting wifi_packet event: {data}")
             socketio.emit("wifi_packet", data, namespace="/wifi")
-            print(data)
         except AttributeError:
             # Some packets may not have IP layer
             continue

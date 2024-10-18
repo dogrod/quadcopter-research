@@ -8,7 +8,7 @@
         <th>Source IP</th>
         <th>Destination IP</th>
         <th>Protocol</th>
-        <th>Info</th>
+        <th>Length</th>
     </tr>
 </table>
 <script>
@@ -25,12 +25,13 @@
     });
 
     socket.on('wifi_packet', function(data) {
+        console.log('Received wifi_packet event:', data);
         var table = document.getElementById('packets');
         var row = table.insertRow(1);
         row.insertCell(0).innerHTML = data.source_ip;
         row.insertCell(1).innerHTML = data.destination_ip;
         row.insertCell(2).innerHTML = data.protocol;
-        row.insertCell(3).innerHTML = data.info;
+        row.insertCell(3).innerHTML = data.length;
     });
 
     document.getElementById('toggle-monitor').addEventListener('click', function() {
