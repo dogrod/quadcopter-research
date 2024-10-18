@@ -24,14 +24,16 @@ MAVLINK_CONNECTION_STRING = "udpout:127.0.0.1:14550"
 # Wi-Fi packet processing
 def start_wifi_capture():
     global display_filter
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    pcap_filename = f'/tmp/ap_traffic_{timestamp}.pcap'
+
+    print(f"Started Wi-Fi capture with filter: '{display_filter}'")
 
     if display_filter.strip() == '':
         # No display filter provided
-        capture = pyshark.LiveCapture(interface=WIFI_INTERFACE)
+        capture = pyshark.LiveCapture(interface=WIFI_INTERFACE, output_file=pcap_filename)
     else:
-        capture = pyshark.LiveCapture(interface=WIFI_INTERFACE, display_filter=display_filter)
-
-    print("Started Wi-Fi capture with filter:", display_filter)
+        capture = pyshark.LiveCapture(interface=WIFI_INTERFACE, display_filter=display_filter, output_file=pcap_filename)
 
     try:
         for packet in capture.sniff_continuously():
@@ -55,6 +57,9 @@ def start_wifi_capture():
         socketio.emit('error', {'message': str(e)}, namespace='/wifi')
     finally:
         capture.close()
+        print(f"Stopped Wi-Fi capture. Saved to {pcap_filename}")
+        # Notify the client that the capture has been saved
+        socketio.emit('capture_saved', {'filename': pcap_filename}, namespace='/wifi')
 
 # MAVLink message processing
 def mavlink_listener():
