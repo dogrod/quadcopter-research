@@ -7,7 +7,7 @@ from flask_socketio import SocketIO, emit
 from pymavlink import mavutil
 
 app = Flask(__name__)
-socketio = SocketIO(app)
+socketio = SocketIO(app, async_mode="eventlet", cors_allowed_origins="*", logger=True, engineio_logger=True)
 
 # Global variables
 wifi_capture_thread = None
