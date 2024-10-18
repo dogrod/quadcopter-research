@@ -40,7 +40,7 @@ def start_wifi_capture():
                 "length": packet.length,
             }
             print(f"Emitting wifi_packet event: {data}")
-            socketio.emit("wifi_packet", data, namespace="/wifi")
+            socketio.emit("wifi_packet", data, namespace="/wifi", broadcast=True)
         except AttributeError:
             # Some packets may not have IP layer
             continue
