@@ -25,7 +25,7 @@ WIFI_INTERFACE = "wlan0"
 # Wi-Fi packet processing
 def start_wifi_capture():
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    pcap_filename = f'/tmp/ap_traffic_{timestamp}.pcap'
+    pcap_filename = f'/data/ap_traffic_{timestamp}.pcap'
 
     capture = pyshark.LiveCapture(interface=WIFI_INTERFACE, output_file=pcap_filename)
 
