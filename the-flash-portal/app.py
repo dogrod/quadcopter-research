@@ -61,7 +61,7 @@ def mavlink_listener(connection_string):
 
     try:
         # Establish MAVLink connection
-        mavlink_connection = mavutil.mavlink_connection(connection_string)
+        mavlink_connection = mavutil.mavlink_connection(connection_string, baud=921600)
         print(f"Established MAVLink connection to {connection_string}")
         
         # Wait for heartbeat to ensure connection is established
