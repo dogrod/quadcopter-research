@@ -32,9 +32,12 @@
     socket.on('mavlink_message', function(data) {
         console.log('Received MAVLink message:', data);
 
+        // Extract the message type properly
+        const messageType = data['mavpackettype'] || 'Unknown';
+
         var table = document.getElementById('mavlink-messages');
         var row = table.insertRow(-1);
-        row.insertCell(0).innerHTML = data.msg;
+        row.insertCell(0).innerHTML = messageType;
         row.insertCell(1).innerHTML = JSON.stringify(data, null, 2);
     });
 
