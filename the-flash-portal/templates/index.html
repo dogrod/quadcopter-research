@@ -33,6 +33,11 @@
 
 <script>
   const socket = io("/", { transports: ["websocket"] });
+  // Connect to the /wifi namespace
+  const wifiSocket = io("/wifi", { transports: ["websocket"] });
+  // Connect to the /mavlink namespace
+  const mavlinkSocket = io("/mavlink", { transports: ["websocket"] });
+
   let monitoring = { wifi: false, mavlink: false };
 
   // Collapsible sections logic
@@ -114,7 +119,8 @@
   }
 
   // Socket event handlers for Wi-Fi packets
-  socket.on("wifi_packet", function (data) {
+  wifiSocket.on("wifi_packet", function (data) {
+    console.log("Received wifi_packet event:", data);
     const table = document.getElementById("wifi-messages");
     const row = table.insertRow(-1);
     row.insertCell(0).innerHTML = data.source_ip;
@@ -124,7 +130,7 @@
   });
 
   // Socket event handlers for MAVLink messages
-  socket.on("mavlink_message", function (data) {
+  mavlinkSocket.on("mavlink_message", function (data) {
     const table = document.getElementById("mavlink-messages");
     const row = table.insertRow(-1);
     const messageType = data["mavpackettype"] || "Unknown";
