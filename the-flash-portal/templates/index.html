@@ -113,16 +113,6 @@
     xhr.send(JSON.stringify({ connection_string: connectionString }));
   }
 
-  function toggleWiFiMonitoring(start = !monitoring.wifi) {
-    monitoring.wifi = start;
-    socket.emit(start ? "start_wifi" : "stop_wifi");
-  }
-
-  function toggleMavlinkMonitoring(start = !monitoring.mavlink) {
-    monitoring.mavlink = start;
-    socket.emit(start ? "start_mavlink" : "stop_mavlink");
-  }
-
   // Socket event handlers for Wi-Fi packets
   socket.on("wifi_packet", function (data) {
     const table = document.getElementById("wifi-messages");
