@@ -45,6 +45,7 @@ def start_wifi_capture():
                 }
                 print(f"Emitting wifi_packet event: {data}")
                 socketio.emit("wifi_packet", data, namespace="/wifi")
+                socketio.sleep(0.1)
             except AttributeError:
                 # Some packets may not have IP layer
                 continue
@@ -83,7 +84,8 @@ def mavlink_listener(connection_string):
                 mavlink_messages.append(msg_dict)  # Store the message
                 # Emit MAVLink message to client
                 socketio.emit('mavlink_message', msg_dict, namespace='/mavlink')
-
+            else:
+                socketio.sleep(0.1)
     except Exception as e:
         print(f"Error in MAVLink listener: {e}")
         socketio.emit('mavlink_error', {'message': str(e)}, namespace='/mavlink')
@@ -181,7 +183,7 @@ def toggle_monitoring():
         stop_capture_event.clear()
         mavlink_stop_event.clear()
         wifi_monitoring = True
-        socketio.start_background_task(start_wifi_capture)
+        socketio.start_background_task(lambda: start_wifi_capture())
 
         # Start MAVLink monitoring with default connection (or adjust as needed)
         connection_string = request.get_json().get("connection_string", "").strip()
