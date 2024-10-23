@@ -7,26 +7,77 @@ nav {
     margin-bottom: 20px;
 }
 
-.content {
-    margin-top: 20px;
-}
-
 table {
     width: 100%;
     border-collapse: collapse;
     margin-top: 20px;
 }
 
-table, th, td {
-    border: 1px solid #333;
+h1 {
+    margin-bottom: 10px;
+}
+
+button {
+    margin: 5px;
+    padding: 10px 20px;
+    font-size: 16px;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+button:hover {
+    background-color: #45a049;
+}
+
+#monitoring-sections {
+    margin-top: 20px;
+}
+
+.collapsible {
+    background-color: #777;
+    color: white;
+    cursor: pointer;
+    padding: 10px;
+    width: 100%;
+    text-align: left;
+    border: none;
+    outline: none;
+    border-radius: 5px;
+    margin-top: 10px;
+}
+
+.content {
+    padding: 10px;
+    margin-top: 20px;
+    display: block;
+    overflow: hidden;
+    background-color: #f9f9f9;
 }
 
 th, td {
+    border: 1px solid #ddd;
     padding: 8px;
     text-align: left;
 }
 
-button {
-    padding: 10px 20px;
-    font-size: 16px;
+th {
+    background-color: #f2f2f2;
+    text-align: left;
+}
+
+tr:nth-child(even) {
+    background-color: #f9f9f9;
+}
+
+tr:hover {
+    background-color: #f1f1f1;
+}
+
+pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-wrap: break-word;
 }

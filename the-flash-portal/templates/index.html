@@ -1,5 +1,145 @@
-{% extends "base.html" %}
-{% block content %}
-<h1>Welcome to the Drone Monitoring App</h1>
-<p>Select a tab to begin.</p>
+{% extends "base.html" %} {% block content %}
+<h1>Monitoring Dashboard</h1>
+
+<div>
+  <button id="start-monitor">Start Monitoring</button>
+  <button id="start-wifi-monitor">Start Wi-Fi Monitoring</button>
+  <button id="start-mavlink-monitor">Start MAVLink Monitoring</button>
+</div>
+
+<div id="monitoring-sections">
+  <button class="collapsible">Wi-Fi Packets</button>
+  <div class="content" id="wifi-content">
+    <table id="wifi-messages">
+      <tr>
+        <th>Source IP</th>
+        <th>Destination IP</th>
+        <th>Protocol</th>
+        <th>Info</th>
+      </tr>
+    </table>
+  </div>
+
+  <button class="collapsible">MAVLink Messages</button>
+  <div class="content" id="mavlink-content">
+    <table id="mavlink-messages">
+      <tr>
+        <th>Message Type</th>
+        <th>Content</th>
+      </tr>
+    </table>
+  </div>
+</div>
+
+<script>
+  const socket = io("/", { transports: ["websocket"] });
+  let monitoring = { wifi: false, mavlink: false };
+
+  // Collapsible sections logic
+  const collapsibles = document.querySelectorAll(".collapsible");
+  collapsibles.forEach((button) => {
+    button.addEventListener("click", function () {
+      this.classList.toggle("active");
+      const content = this.nextElementSibling;
+      content.style.display =
+        content.style.display === "block" ? "none" : "block";
+    });
+  });
+
+  // Helper to update button text
+  function updateButtonText() {
+    document.getElementById("start-monitor").textContent =
+      monitoring.wifi && monitoring.mavlink
+        ? "Stop Monitoring"
+        : "Start Monitoring";
+    document.getElementById("start-wifi-monitor").textContent = monitoring.wifi
+      ? "Stop Wi-Fi Monitoring"
+      : "Start Wi-Fi Monitoring";
+    document.getElementById("start-mavlink-monitor").textContent =
+      monitoring.mavlink
+        ? "Stop MAVLink Monitoring"
+        : "Start MAVLink Monitoring";
+  }
+
+  // Event handlers for the buttons
+  document
+    .getElementById("start-monitor")
+    .addEventListener("click", function () {
+      const connectionString = prompt("Enter MAVLink connection string:");
+      if (!connectionString) {
+        alert("Connection string is required!");
+        return;
+      }
+      toggleMonitoring(connectionString);
+      updateButtonText();
+    });
+
+  document
+    .getElementById("start-wifi-monitor")
+    .addEventListener("click", function () {
+      toggleWiFiMonitoring();
+      updateButtonText();
+    });
+
+  document
+    .getElementById("start-mavlink-monitor")
+    .addEventListener("click", function () {
+      const connectionString = prompt("Enter MAVLink connection string:");
+      if (!connectionString) {
+        alert("Connection string is required!");
+        return;
+      }
+      toggleMavlinkMonitoring(connectionString);
+      updateButtonText();
+    });
+
+  function toggleMonitoring(connectionString) {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/toggle_monitoring", true);
+    xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+    xhr.send(JSON.stringify({ connection_string: connectionString }));
+  }
+
+  function toggleWiFiMonitoring() {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/toggle_wifi_monitoring", true);
+    xhr.send();
+  }
+
+  function toggleMavlinkMonitoring(connectionString) {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/toggle_mavlink_monitor", true);
+    xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+    xhr.send(JSON.stringify({ connection_string: connectionString }));
+  }
+
+  function toggleWiFiMonitoring(start = !monitoring.wifi) {
+    monitoring.wifi = start;
+    socket.emit(start ? "start_wifi" : "stop_wifi");
+  }
+
+  function toggleMavlinkMonitoring(start = !monitoring.mavlink) {
+    monitoring.mavlink = start;
+    socket.emit(start ? "start_mavlink" : "stop_mavlink");
+  }
+
+  // Socket event handlers for Wi-Fi packets
+  socket.on("wifi_packet", function (data) {
+    const table = document.getElementById("wifi-messages");
+    const row = table.insertRow(-1);
+    row.insertCell(0).innerHTML = data.source_ip;
+    row.insertCell(1).innerHTML = data.destination_ip;
+    row.insertCell(2).innerHTML = data.protocol;
+    row.insertCell(3).innerHTML = `<pre>${data.info}</pre>`;
+  });
+
+  // Socket event handlers for MAVLink messages
+  socket.on("mavlink_message", function (data) {
+    const table = document.getElementById("mavlink-messages");
+    const row = table.insertRow(-1);
+    const messageType = data["mavpackettype"] || "Unknown";
+    row.insertCell(0).innerHTML = messageType;
+    row.insertCell(1).innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+  });
+</script>
 {% endblock %}

@@ -139,6 +139,36 @@ def toggle_mavlink_monitor():
         mavlink_thread.start()
     return ('', 204)
 
+# Combined Monitoring Logic (Start/Stop Both)
+@app.route("/toggle_monitoring", methods=["POST"])
+def toggle_monitoring():
+    global wifi_monitoring
+
+    if wifi_monitoring and (mavlink_thread and mavlink_thread.is_alive()):
+        # Stop both monitors
+        print("Stopping both Wi-Fi and MAVLink monitoring...")
+        stop_capture_event.set()
+        mavlink_stop_event.set()
+        if mavlink_thread:
+            mavlink_thread.join()
+        mavlink_thread = None
+        wifi_monitoring = False
+    else:
+        # Start both monitors
+        print("Starting both Wi-Fi and MAVLink monitoring...")
+        stop_capture_event.clear()
+        mavlink_stop_event.clear()
+        wifi_monitoring = True
+        socketio.start_background_task(start_wifi_capture)
+
+        # Start MAVLink monitoring with default connection (or adjust as needed)
+        connection_string = request.get_json().get("connection_string", "").strip()
+        if not connection_string:
+            return ("Connection string is required", 400)
+        mavlink_thread = Thread(target=mavlink_listener, args=(connection_string,))
+        mavlink_thread.start()
+    return ("", 204)
+
 # SocketIO Namespaces
 @socketio.on("connect", namespace="/wifi")
 def wifi_connect():
