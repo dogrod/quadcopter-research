@@ -40,7 +40,7 @@ def start_wifi_capture():
                     "source_ip": packet.ip.src,
                     "destination_ip": packet.ip.dst,
                     "protocol": packet.transport_layer,
-                    # "info": str(packet),
+                    "info": str(packet),
                     "length": packet.length,
                 }
                 print(f"Emitting wifi_packet event: {data}")
@@ -136,6 +136,8 @@ def toggle_wifi_monitor():
         wifi_monitoring = True
         # Start the packet capture in a new thread with application context
         socketio.start_background_task(start_wifi_capture)
+
+    socketio.emit("wifi_status", {"monitoring": wifi_monitoring}, namespace="/wifi")
     return ("", 204)
 
 @app.route('/toggle_mavlink_monitor', methods=['POST'])

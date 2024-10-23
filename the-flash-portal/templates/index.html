@@ -83,7 +83,6 @@
     .getElementById("start-wifi-monitor")
     .addEventListener("click", function () {
       toggleWiFiMonitoring();
-      updateButtonText();
     });
 
   document
@@ -117,6 +116,13 @@
     xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
     xhr.send(JSON.stringify({ connection_string: connectionString }));
   }
+
+  // Listen for Wi-Fi status updates
+  wifiSocket.on("wifi_status", function (data) {
+    console.log("Received Wi-Fi status update:", data);
+    monitoring.wifi = data.monitoring; // Update the monitoring state
+    updateButtonText(); // Update the button text based on the new state
+  });
 
   // Socket event handlers for Wi-Fi packets
   wifiSocket.on("wifi_packet", function (data) {
