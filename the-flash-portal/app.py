@@ -1,3 +1,4 @@
+import csv
 import datetime
 import pyshark
 
@@ -18,6 +19,7 @@ stop_capture_event = Event()
 mavlink_connection = None
 mavlink_thread = None
 mavlink_stop_event = Event()
+mavlink_messages = []
 
 # Configuration
 WIFI_INTERFACE = "wlan0"
@@ -25,7 +27,7 @@ WIFI_INTERFACE = "wlan0"
 # Wi-Fi packet processing
 def start_wifi_capture():
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    pcap_filename = f'/data/ap_traffic_{timestamp}.pcap'
+    pcap_filename = f'/data/wifi/ap_traffic_{timestamp}.pcap'
 
     capture = pyshark.LiveCapture(interface=WIFI_INTERFACE, output_file=pcap_filename)
 
@@ -57,14 +59,16 @@ def start_wifi_capture():
 
 # MAVLink message processing
 def mavlink_listener(connection_string):
-    global mavlink_connection
+    global mavlink_connection, mavlink_messages
 
     try:
         # Establish MAVLink connection
+        print(f"Attempting to establish MAVLink connection to {connection_string}")
         mavlink_connection = mavutil.mavlink_connection(connection_string, baud=921600)
         print(f"Established MAVLink connection to {connection_string}")
         
         # Wait for heartbeat to ensure connection is established
+        print("Waiting for heartbeat...")
         mavlink_connection.wait_heartbeat()
         print("Heartbeat received. Connection successful.", mavlink_connection.target_system, mavlink_connection.target_component)
         socketio.emit('mavlink_status', {'status': 'Connected'}, namespace='/mavlink')
@@ -75,6 +79,8 @@ def mavlink_listener(connection_string):
             if msg:
                 # Convert message to dictionary
                 msg_dict = msg.to_dict()
+                print(f"Received MAVLink message: {msg_dict}")
+                mavlink_messages.append(msg_dict)  # Store the message
                 # Emit MAVLink message to client
                 socketio.emit('mavlink_message', msg_dict, namespace='/mavlink')
 
@@ -86,6 +92,18 @@ def mavlink_listener(connection_string):
             mavlink_connection.close()
             print("MAVLink connection closed.")
             socketio.emit('mavlink_status', {'status': 'Disconnected'}, namespace='/mavlink')
+
+def save_mavlink_to_csv():
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f"/data/mavlink/mavlink_data_{timestamp}.csv"
+
+    with open(filename, mode='w', newline='') as file:
+        writer = csv.DictWriter(file, fieldnames=mavlink_messages[0].keys())
+        writer.writeheader()
+        writer.writerows(mavlink_messages)
+
+    print(f"MAVLink messages saved to {filename}")
+    return filename
 
 # Routes
 @app.route("/")
@@ -128,6 +146,10 @@ def toggle_mavlink_monitor():
         mavlink_thread.join()
         mavlink_thread = None
         mavlink_stop_event.clear()
+
+        # Save messages to CSV
+        filename = save_mavlink_to_csv()
+        socketio.emit('csv_saved', {'filename': filename}, namespace='/mavlink')
     else:
         # Start MAVLink monitoring
         data = request.get_json()
