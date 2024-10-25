@@ -231,9 +231,6 @@ def signal_handler(sig, frame):
         mavlink_stop_event.set()
         mavlink_thread.join()
 
-    # Close the SocketIO server and exit
-    print("Closing SocketIO server...")
-    socketio.stop()
     sys.exit(0)
 
 # Register signal handlers
