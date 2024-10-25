@@ -66,7 +66,10 @@ def start_wifi_capture():
     finally:
         # Ensure capture is closed properly
         print("Closing Wi-Fi capture...")
-        asyncio.run(close_capture(capture))
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(close_capture(capture))
+        loop.close()
 
         print(f"Wi-Fi capture stopped and saved to {pcap_filename}")
         socketio.emit('capture_saved', {'filename': pcap_filename}, namespace='/wifi')
@@ -228,7 +231,6 @@ def mavlink_connect():
     status = 'Connected' if mavlink_thread and mavlink_thread.is_alive() else 'Disconnected'
     emit('mavlink_status', {'status': status})
 
-
 def signal_handler(sig, frame):
     print("Gracefully shutting down...")
 
@@ -248,6 +250,7 @@ def signal_handler(sig, frame):
         loop = asyncio.get_running_loop()
         if not loop.is_closed():
             loop.run_until_complete(loop.shutdown_asyncgens())
+            loop.stop()
             loop.close()
     except RuntimeError:
         print("No running event loop to close.")
