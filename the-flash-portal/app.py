@@ -1,3 +1,4 @@
+import asyncio
 import signal
 import sys
 import csv
@@ -25,6 +26,14 @@ mavlink_messages = []
 
 # Configuration
 WIFI_INTERFACE = "wlan0"
+
+async def close_capture(capture):
+    """Async helper to close the capture properly."""
+    try:
+        await capture.close_async()
+        print("Wi-Fi capture closed successfully.")
+    except Exception as e:
+        print(f"Error while closing Wi-Fi capture: {e}")
 
 # Wi-Fi packet processing
 def start_wifi_capture():
@@ -55,7 +64,10 @@ def start_wifi_capture():
         print(f"Error during packet capture: {e}")
         socketio.emit('error', {'message': str(e)}, namespace='/wifi')
     finally:
-        capture.close()
+        # Ensure capture is closed properly
+        print("Closing Wi-Fi capture...")
+        asyncio.run(close_capture(capture))
+
         print(f"Wi-Fi capture stopped and saved to {pcap_filename}")
         socketio.emit('capture_saved', {'filename': pcap_filename}, namespace='/wifi')
 
@@ -230,6 +242,15 @@ def signal_handler(sig, frame):
         print("Stopping MAVLink monitoring...")
         mavlink_stop_event.set()
         mavlink_thread.join()
+
+    # Close the event loop
+    try:
+        loop = asyncio.get_running_loop()
+        if not loop.is_closed():
+            loop.run_until_complete(loop.shutdown_asyncgens())
+            loop.close()
+    except RuntimeError:
+        print("No running event loop to close.")
 
     sys.exit(0)
 
