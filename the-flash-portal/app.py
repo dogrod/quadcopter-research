@@ -40,7 +40,7 @@ def start_wifi_capture():
                     "source_ip": packet.ip.src,
                     "destination_ip": packet.ip.dst,
                     "protocol": packet.transport_layer,
-                    "info": str(packet),
+                    # "info": str(packet),
                     "length": packet.length,
                 }
                 print(f"Emitting wifi_packet event: {data}")

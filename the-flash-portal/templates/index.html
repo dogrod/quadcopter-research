@@ -15,7 +15,7 @@
         <th>Source IP</th>
         <th>Destination IP</th>
         <th>Protocol</th>
-        <th>Info</th>
+        <th>Length</th>
       </tr>
     </table>
   </div>
@@ -132,7 +132,7 @@
     row.insertCell(0).innerHTML = data.source_ip;
     row.insertCell(1).innerHTML = data.destination_ip;
     row.insertCell(2).innerHTML = data.protocol;
-    row.insertCell(3).innerHTML = `<pre>${data.info}</pre>`;
+    row.insertCell(3).innerHTML = data.length;
   });
 
   // Listen for MAVLink status updates
