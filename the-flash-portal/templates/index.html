@@ -21,6 +21,7 @@
   </div>
 
   <button class="collapsible">MAVLink Messages</button>
+  <div id="mavlink-status">MAVLink Status: Disconnected</div>
   <div class="content" id="mavlink-content">
     <table id="mavlink-messages">
       <tr>
@@ -94,7 +95,6 @@
         return;
       }
       toggleMavlinkMonitoring(connectionString);
-      updateButtonText();
     });
 
   function toggleMonitoring(connectionString) {
@@ -133,6 +133,21 @@
     row.insertCell(1).innerHTML = data.destination_ip;
     row.insertCell(2).innerHTML = data.protocol;
     row.insertCell(3).innerHTML = `<pre>${data.info}</pre>`;
+  });
+
+  // Listen for MAVLink status updates
+  mavlinkSocket.on("mavlink_status", function (data) {
+    console.log("Received MAVLink status update:", data);
+
+    // Update the monitoring state
+    monitoring.mavlink = data.monitoring;
+
+    // Optionally, display the connection status
+    const statusElement = document.getElementById("mavlink-status");
+    statusElement.textContent = `MAVLink Status: ${data.status}`;
+
+    // Update button text based on the new state
+    updateButtonText();
   });
 
   // Socket event handlers for MAVLink messages

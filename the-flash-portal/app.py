@@ -163,6 +163,14 @@ def toggle_mavlink_monitor():
         print(f"Starting MAVLink monitoring with connection string: {connection_string}")
         mavlink_thread = Thread(target=mavlink_listener, args=(connection_string,))
         mavlink_thread.start()
+
+    # Determine the current status after toggling
+    status = 'Connected' if mavlink_thread and mavlink_thread.is_alive() else 'Disconnected'
+    monitoring_state = bool(mavlink_thread)
+
+    # Emit the updated status to the client
+    socketio.emit('mavlink_status', {'monitoring': monitoring_state, 'status': status}, namespace='/mavlink')
+    
     return ('', 204)
 
 # Combined Monitoring Logic (Start/Stop Both)
