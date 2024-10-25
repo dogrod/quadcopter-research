@@ -231,9 +231,8 @@ def mavlink_connect():
     status = 'Connected' if mavlink_thread and mavlink_thread.is_alive() else 'Disconnected'
     emit('mavlink_status', {'status': status})
 
-def signal_handler(sig, frame):
-    print("Gracefully shutting down...")
-
+def stop_threads():
+    print("Stopping threads...")
     # Stop Wi-Fi monitoring if running
     if wifi_monitoring:
         print("Stopping Wi-Fi monitoring...")
@@ -244,16 +243,35 @@ def signal_handler(sig, frame):
         print("Stopping MAVLink monitoring...")
         mavlink_stop_event.set()
         mavlink_thread.join()
+        print("MAVLink monitoring stopped.")
 
-    # Close the event loop
+def stop_event_loop(loop):
+    """Stop and close the event loop gracefully."""
     try:
-        loop = asyncio.get_running_loop()
         if not loop.is_closed():
+            print("Stopping event loop...")
+            pending_tasks = [t for t in asyncio.all_tasks(loop) if not t.done()]
+            for task in pending_tasks:
+                task.cancel()
+                try:
+                    loop.run_until_complete(task)
+                except asyncio.CancelledError:
+                    print(f"Cancelled task: {task}")
+
             loop.run_until_complete(loop.shutdown_asyncgens())
-            loop.stop()
             loop.close()
-    except RuntimeError:
-        print("No running event loop to close.")
+            print("Event loop closed.")
+    except RuntimeError as e:
+        print(f"Error closing event loop: {e}")
+
+def signal_handler(sig, frame):
+    print("Gracefully shutting down...")
+
+    stop_threads()
+
+    # Stop the asyncio event loop
+    loop = asyncio.get_event_loop()
+    stop_event_loop(loop)
 
     sys.exit(0)
 
@@ -267,4 +285,6 @@ if __name__ == "__main__":
         socketio.run(app, host="0.0.0.0", port=5001)
     except KeyboardInterrupt:
         print("Server interrupted by user. Shutting down...")
-        signal_handler(None, None)
+        loop = asyncio.get_event_loop()
+        stop_event_loop(loop)
+        sys.exit(0)
