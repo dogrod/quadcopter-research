@@ -55,13 +55,9 @@ def start_wifi_capture():
         print(f"Error during packet capture: {e}")
         socketio.emit('error', {'message': str(e)}, namespace='/wifi')
     finally:
-        # Cleanly close the capture and notify client
-        try:
-            capture.close()
-            print(f"Wi-Fi capture stopped and saved to {pcap_filename}")
-            socketio.emit('capture_saved', {'filename': pcap_filename}, namespace='/wifi')
-        except Exception as e:
-            print(f"Error closing Wi-Fi capture: {e}")
+        capture.close()
+        print(f"Wi-Fi capture stopped and saved to {pcap_filename}")
+        socketio.emit('capture_saved', {'filename': pcap_filename}, namespace='/wifi')
 
 # MAVLink message processing
 def mavlink_listener(connection_string):
@@ -250,4 +246,4 @@ if __name__ == "__main__":
         socketio.run(app, host="0.0.0.0", port=5001)
     except KeyboardInterrupt:
         print("Server interrupted by user. Shutting down...")
-        sys.exit(0)
+        signal_handler(None, None)
