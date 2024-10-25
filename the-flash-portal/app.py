@@ -1,3 +1,5 @@
+import signal
+import sys
 import csv
 import datetime
 import pyshark
@@ -29,9 +31,9 @@ def start_wifi_capture():
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     pcap_filename = f'/data/wifi/ap_traffic_{timestamp}.pcap'
 
-    capture = pyshark.LiveCapture(interface=WIFI_INTERFACE, output_file=pcap_filename)
-
     try:
+        capture = pyshark.LiveCapture(interface=WIFI_INTERFACE, output_file=pcap_filename)
+
         for packet in capture.sniff_continuously():
             if stop_capture_event.is_set():
                 break
@@ -53,10 +55,13 @@ def start_wifi_capture():
         print(f"Error during packet capture: {e}")
         socketio.emit('error', {'message': str(e)}, namespace='/wifi')
     finally:
-        capture.close()
-        print(f"Stopped Wi-Fi capture. Saved to {pcap_filename}")
-        # Notify the client that the capture has been saved
-        socketio.emit('capture_saved', {'filename': pcap_filename}, namespace='/wifi')
+        # Cleanly close the capture and notify client
+        try:
+            capture.close()
+            print(f"Wi-Fi capture stopped and saved to {pcap_filename}")
+            socketio.emit('capture_saved', {'filename': pcap_filename}, namespace='/wifi')
+        except Exception as e:
+            print(f"Error closing Wi-Fi capture: {e}")
 
 # MAVLink message processing
 def mavlink_listener(connection_string):
@@ -215,5 +220,34 @@ def mavlink_connect():
     status = 'Connected' if mavlink_thread and mavlink_thread.is_alive() else 'Disconnected'
     emit('mavlink_status', {'status': status})
 
+
+def signal_handler(sig, frame):
+    print("Gracefully shutting down...")
+
+    # Stop Wi-Fi monitoring if running
+    if wifi_monitoring:
+        print("Stopping Wi-Fi monitoring...")
+        stop_capture_event.set()
+
+    # Stop MAVLink monitoring if running
+    if mavlink_thread and mavlink_thread.is_alive():
+        print("Stopping MAVLink monitoring...")
+        mavlink_stop_event.set()
+        mavlink_thread.join()
+
+    # Close the SocketIO server and exit
+    print("Closing SocketIO server...")
+    socketio.stop()
+    sys.exit(0)
+
+# Register signal handlers
+signal.signal(signal.SIGINT, signal_handler)  # Handle Ctrl+C
+signal.signal(signal.SIGTERM, signal_handler)  # Handle termination signals
+
 if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=5001)
+    try:
+        # Start the Flask-SocketIO app
+        socketio.run(app, host="0.0.0.0", port=5001)
+    except KeyboardInterrupt:
+        print("Server interrupted by user. Shutting down...")
+        sys.exit(0)
