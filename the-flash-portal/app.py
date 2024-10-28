@@ -115,8 +115,14 @@ def save_mavlink_to_csv():
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     filename = f"/data/mavlink/mavlink_data_{timestamp}.csv"
 
+    # Collect all unique keys from all messages
+    fieldnames = set()
+    for message in mavlink_messages:
+        fieldnames.update(message.keys())
+    fieldnames = list(fieldnames)  # Convert back to a list for DictWriter
+
     with open(filename, mode='w', newline='') as file:
-        writer = csv.DictWriter(file, fieldnames=mavlink_messages[0].keys())
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(mavlink_messages)
 
