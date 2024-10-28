@@ -74,6 +74,53 @@ def start_wifi_capture():
         print(f"Wi-Fi capture stopped and saved to {pcap_filename}")
         socketio.emit('capture_saved', {'filename': pcap_filename}, namespace='/wifi')
 
+def configure_mavlink_streams(master):
+    """
+    Configure MAVLink stream rates for different message types
+    """
+    # Define the messages we want to receive more frequently
+    # Rate of 10Hz (10 messages per second)
+    rate = 10
+    
+    # Request streams
+    # GPS and position data
+    master.mav.request_data_stream_send(
+        master.target_system,
+        master.target_component,
+        mavutil.mavlink.MAV_DATA_STREAM_POSITION,
+        rate,
+        1  # Start sending
+    )
+    
+    # Attitude data
+    master.mav.request_data_stream_send(
+        master.target_system,
+        master.target_component,
+        mavutil.mavlink.MAV_DATA_STREAM_EXTRA1,
+        rate,
+        1
+    )
+    
+    # VFR_HUD and RANGEFINDER data
+    master.mav.request_data_stream_send(
+        master.target_system,
+        master.target_component,
+        mavutil.mavlink.MAV_DATA_STREAM_EXTRA2,
+        rate,
+        1
+    )
+    
+    # Raw sensor data
+    master.mav.request_data_stream_send(
+        master.target_system,
+        master.target_component,
+        mavutil.mavlink.MAV_DATA_STREAM_RAW_SENSORS,
+        rate,
+        1
+    )
+
+    print("MAVLink streams configured.")
+
 # MAVLink message processing
 def mavlink_listener(connection_string):
     global mavlink_connection, mavlink_messages
@@ -81,8 +128,11 @@ def mavlink_listener(connection_string):
     try:
         # Establish MAVLink connection
         print(f"Attempting to establish MAVLink connection to {connection_string}")
-        mavlink_connection = mavutil.mavlink_connection(connection_string, baud=921600)
+        baud_rate = 921600
+        mavlink_connection = mavutil.mavlink_connection(connection_string, baud=baud_rate)
         print(f"Established MAVLink connection to {connection_string}")
+
+        configure_mavlink_streams(mavlink_connection)
         
         # Wait for heartbeat to ensure connection is established
         print("Waiting for heartbeat...")
@@ -90,6 +140,8 @@ def mavlink_listener(connection_string):
         print("Heartbeat received. Connection successful.", mavlink_connection.target_system, mavlink_connection.target_component)
         socketio.emit('mavlink_status', {'status': 'Connected'}, namespace='/mavlink')
         
+        message_count = 0
+
         while not mavlink_stop_event.is_set():
             # Listen for MAVLink messages
             msg = mavlink_connection.recv_match(blocking=False)
@@ -97,9 +149,12 @@ def mavlink_listener(connection_string):
                 # Convert message to dictionary
                 msg_dict = msg.to_dict()
                 print(f"Received MAVLink message: {msg_dict}")
+                message_count += 1
                 mavlink_messages.append(msg_dict)  # Store the message
+
                 # Emit MAVLink message to client
                 socketio.emit('mavlink_message', msg_dict, namespace='/mavlink')
+                socketio.emit('mavlink_message_count', {'count': message_count}, namespace='/mavlink')
             else:
                 socketio.sleep(0.1)
     except Exception as e:
@@ -112,22 +167,29 @@ def mavlink_listener(connection_string):
             socketio.emit('mavlink_status', {'status': 'Disconnected'}, namespace='/mavlink')
 
 def save_mavlink_to_csv():
+    global mavlink_messages
+
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     filename = f"/data/mavlink/mavlink_data_{timestamp}.csv"
 
-    # Collect all unique keys from all messages
-    fieldnames = set()
-    for message in mavlink_messages:
-        fieldnames.update(message.keys())
-    fieldnames = list(fieldnames)  # Convert back to a list for DictWriter
+    try:
+        if not mavlink_messages:
+            raise ValueError("No MAVLink messages to save")
 
-    with open(filename, mode='w', newline='') as file:
-        writer = csv.DictWriter(file, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(mavlink_messages)
+        fieldnames = sorted(set().union(*(message.keys() for message in mavlink_messages)))
 
-    print(f"MAVLink messages saved to {filename}")
-    return filename
+        # Use a larger buffer size for better I/O performance
+        with open(filename, mode='w', newline='', buffering=8192) as file:
+            writer = csv.DictWriter(file, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(mavlink_messages)
+
+        print(f"Successfully saved {len(mavlink_messages)} messages to {filename}")
+        return filename
+
+    except Exception as e:
+        print(f"Error saving MAVLink messages: {str(e)}")
+        raise
 
 # Routes
 @app.route("/")
