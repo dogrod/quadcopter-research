@@ -77,12 +77,25 @@ def start_wifi_capture():
 def configure_mavlink_streams(master):
     """
     Configure MAVLink stream rates for different message types
+    See: https://github.com/ArduPilot/pymavlink/blob/master/tools/mavtelemetry_datarates.py
     """
     # Define the messages we want to receive more frequently
     # Rate of 10Hz (10 messages per second)
     rate = 10
     
     # Request streams
+
+    # EXT_STAT
+    # Extended status data
+    master.mav.request_data_stream_send(
+        master.target_system,
+        master.target_component,
+        mavutil.mavlink.MAV_DATA_STREAM_EXT_STAT,
+        rate,
+        1  # Start sending
+    )
+
+    # POSITION
     # GPS and position data
     master.mav.request_data_stream_send(
         master.target_system,
@@ -92,6 +105,7 @@ def configure_mavlink_streams(master):
         1  # Start sending
     )
     
+    # Extra 1
     # Attitude data
     master.mav.request_data_stream_send(
         master.target_system,
@@ -101,11 +115,22 @@ def configure_mavlink_streams(master):
         1
     )
     
-    # VFR_HUD and RANGEFINDER data
+    # Extra 2
+    # VFR_HUD data
+    # master.mav.request_data_stream_send(
+    #     master.target_system,
+    #     master.target_component,
+    #     mavutil.mavlink.MAV_DATA_STREAM_EXTRA2,
+    #     rate,
+    #     1
+    # )
+
+    # Extra 3
+    # RANGEFINDER / BATTERY e.t.c.
     master.mav.request_data_stream_send(
         master.target_system,
         master.target_component,
-        mavutil.mavlink.MAV_DATA_STREAM_EXTRA2,
+        mavutil.mavlink.MAV_DATA_STREAM_EXTRA3,
         rate,
         1
     )
