@@ -78,6 +78,7 @@ def configure_mavlink_streams(master):
     """
     Configure MAVLink stream rates for different message types
     See: https://github.com/ArduPilot/pymavlink/blob/master/tools/mavtelemetry_datarates.py
+    And: https://github.com/ArduPilot/pymavlink/blob/6b4dd1eca2a8069e540c51135c4ef7549c517f84/generator/swift/Tests/MAVLinkTests/Testdata/common.xml
     """
     # Define the messages we want to receive more frequently
     # Rate of 10Hz (10 messages per second)
@@ -86,17 +87,17 @@ def configure_mavlink_streams(master):
     # Request streams
 
     # EXT_STAT
-    # Extended status data
+    # GPS_STATUS, CONTROL_STATUS, AUX_STATUS
     master.mav.request_data_stream_send(
         master.target_system,
         master.target_component,
-        mavutil.mavlink.MAV_DATA_STREAM_EXT_STAT,
+        mavutil.mavlink.MAV_DATA_STREAM_EXTENDED_STATUS,
         rate,
         1  # Start sending
     )
 
     # POSITION
-    # GPS and position data
+    # LOCAL_POSITION, GLOBAL_POSITION/GLOBAL_POSITION_INT
     master.mav.request_data_stream_send(
         master.target_system,
         master.target_component,
