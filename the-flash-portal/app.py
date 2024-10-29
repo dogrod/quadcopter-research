@@ -222,6 +222,10 @@ def save_mavlink_to_csv():
 def index():
     return render_template("index.html")
 
+@app.route("/dashboard")
+def index():
+    return render_template("dashboard.html")
+
 @app.route("/wifi")
 def wifi_tab():
     return render_template("wifi.html")
