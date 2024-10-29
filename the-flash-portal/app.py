@@ -223,7 +223,7 @@ def index():
     return render_template("index.html")
 
 @app.route("/dashboard")
-def index():
+def dashboard():
     return render_template("dashboard.html")
 
 @app.route("/wifi")
