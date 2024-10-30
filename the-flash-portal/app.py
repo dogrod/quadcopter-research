@@ -5,7 +5,7 @@ import csv
 import datetime
 import pyshark
 
-from threading import Thread, Event
+from threading import Thread, Event, Lock
 from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit
 from pymavlink import mavutil
@@ -23,6 +23,7 @@ mavlink_connection = None
 mavlink_thread = None
 mavlink_stop_event = Event()
 mavlink_messages = []
+mavlink_message_lock = Lock()
 
 # Configuration
 WIFI_INTERFACE = "wlan0"
@@ -149,9 +150,23 @@ def configure_mavlink_streams(master):
 
 # MAVLink message processing
 def mavlink_listener(connection_string):
+    """
+    Listen for MAVLink messages and handle the connection.
+    """
     global mavlink_connection, mavlink_messages
 
     try:
+        with mavlink_message_lock:
+            if mavlink_messages:
+                try:
+                    filename = save_mavlink_to_csv()
+                    if filename:
+                        socketio.emit('csv_saved', {'filename': filename}, namespace='/mavlink')
+                except Exception as e:
+                    print(f"Error saving MAVLink messages: {str(e)}")
+                    socketio.emit('mavlink_error', {'message': f'Failed to save existing messages{str(e)}'}, namespace='/mavlink')
+                    return
+
         # Establish MAVLink connection
         print(f"Attempting to establish MAVLink connection to {connection_string}")
         baud_rate = 921600
@@ -183,6 +198,7 @@ def mavlink_listener(connection_string):
                 socketio.emit('mavlink_message_count', {'count': message_count}, namespace='/mavlink')
             else:
                 socketio.sleep(0.1)
+
     except Exception as e:
         print(f"Error in MAVLink listener: {e}")
         socketio.emit('mavlink_error', {'message': str(e)}, namespace='/mavlink')
@@ -193,29 +209,35 @@ def mavlink_listener(connection_string):
             socketio.emit('mavlink_status', {'status': 'Disconnected'}, namespace='/mavlink')
 
 def save_mavlink_to_csv():
+    """
+    Save MAVLink messages to CSV and clear the messages list.
+    Returns:
+        str: Path to saved CSV file or None if no messages to save
+    """
     global mavlink_messages
 
-    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    filename = f"/data/mavlink/mavlink_data_{timestamp}.csv"
-
-    try:
+    with mavlink_message_lock:
         if not mavlink_messages:
-            raise ValueError("No MAVLink messages to save")
+            return None
 
-        fieldnames = sorted(set().union(*(message.keys() for message in mavlink_messages)))
+        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"/data/mavlink/mavlink_data_{timestamp}.csv"
 
-        # Use a larger buffer size for better I/O performance
-        with open(filename, mode='w', newline='', buffering=8192) as file:
-            writer = csv.DictWriter(file, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(mavlink_messages)
+        try:
+            fieldnames = sorted(set().union(*(message.keys() for message in mavlink_messages)))
 
-        print(f"Successfully saved {len(mavlink_messages)} messages to {filename}")
-        return filename
+            # Use a larger buffer size for better I/O performance
+            with open(filename, mode='w', newline='', buffering=8192) as file:
+                writer = csv.DictWriter(file, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(mavlink_messages)
 
-    except Exception as e:
-        print(f"Error saving MAVLink messages: {str(e)}")
-        raise
+            print(f"Successfully saved {len(mavlink_messages)} messages to {filename}")
+            return filename
+
+        except Exception as e:
+            print(f"Error saving MAVLink messages: {str(e)}")
+            raise
 
 # Routes
 @app.route("/")
@@ -257,6 +279,7 @@ def toggle_wifi_monitor():
 @app.route('/toggle_mavlink_monitor', methods=['POST'])
 def toggle_mavlink_monitor():
     global mavlink_thread, mavlink_stop_event
+    
     if mavlink_thread and mavlink_thread.is_alive():
         # Stop MAVLink monitoring
         print("Stopping MAVLink monitoring...")
@@ -266,15 +289,22 @@ def toggle_mavlink_monitor():
         mavlink_stop_event.clear()
 
         # Save messages to CSV
-        filename = save_mavlink_to_csv()
-        socketio.emit('csv_saved', {'filename': filename}, namespace='/mavlink')
+        try:
+            filename = save_mavlink_to_csv()
+            if filename:
+                socketio.emit('csv_saved', {'filename': filename}, namespace='/mavlink')
+        except Exception as e:
+            print(f'Error saving MAVLink messages: {str(e)}', 500)
+            socketio.emit('mavlink_error', {'message': f'Failed to save existing messages{str(e)}'}, namespace='/mavlink')
     else:
         # Start MAVLink monitoring
         data = request.get_json()
         connection_string = data.get('connection_string', '').strip()
         if not connection_string:
             return ('Connection string is required', 400)
+
         print(f"Starting MAVLink monitoring with connection string: {connection_string}")
+        mavlink_stop_event.clear()
         mavlink_thread = Thread(target=mavlink_listener, args=(connection_string,))
         mavlink_thread.start()
 
@@ -283,7 +313,9 @@ def toggle_mavlink_monitor():
     monitoring_state = bool(mavlink_thread)
 
     # Emit the updated status to the client
-    socketio.emit('mavlink_status', {'monitoring': monitoring_state, 'status': status}, namespace='/mavlink')
+    socketio.emit('mavlink_status',
+                  {'monitoring': monitoring_state, 'status': status},
+                  namespace='/mavlink')
     
     return ('', 204)
 
