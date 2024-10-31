@@ -175,6 +175,8 @@ def mavlink_listener(connection_string):
         while not mavlink_stop_event.is_set():
             # Listen for MAVLink messages
             msg = mavlink_connection.recv_match(blocking=False)
+            # Add timestamp to message
+            msg._timestamp = datetime.datetime.now().isoformat()
             if msg:
                 # Convert message to dictionary
                 msg_dict = msg.to_dict()
