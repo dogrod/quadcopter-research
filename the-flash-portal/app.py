@@ -156,17 +156,6 @@ def mavlink_listener(connection_string):
     global mavlink_connection, mavlink_messages
 
     try:
-        with mavlink_message_lock:
-            if mavlink_messages:
-                try:
-                    filename = save_mavlink_to_csv()
-                    if filename:
-                        socketio.emit('csv_saved', {'filename': filename}, namespace='/mavlink')
-                except Exception as e:
-                    print(f"Error saving MAVLink messages: {str(e)}")
-                    socketio.emit('mavlink_error', {'message': f'Failed to save existing messages{str(e)}'}, namespace='/mavlink')
-                    return
-
         # Establish MAVLink connection
         print(f"Attempting to establish MAVLink connection to {connection_string}")
         baud_rate = 921600
@@ -279,6 +268,20 @@ def toggle_wifi_monitor():
 @app.route('/toggle_mavlink_monitor', methods=['POST'])
 def toggle_mavlink_monitor():
     global mavlink_thread, mavlink_stop_event
+
+    # Check if mavlink_message list is not empty
+    if mavlink_messages:
+        # Save messages to CSV
+        try:
+            filename = save_mavlink_to_csv()
+            if filename:
+                socketio.emit('csv_saved', {'filename': filename}, namespace='/mavlink')
+
+            # Clear the messages list
+            mavlink_messages.clear()
+        except Exception as e:
+            print(f'Error saving MAVLink messages: {str(e)}', 500)
+            socketio.emit('mavlink_error', {'message': f'Failed to save existing messages{str(e)}'}, namespace='/mavlink')
     
     if mavlink_thread and mavlink_thread.is_alive():
         # Stop MAVLink monitoring
@@ -287,15 +290,6 @@ def toggle_mavlink_monitor():
         mavlink_thread.join()
         mavlink_thread = None
         mavlink_stop_event.clear()
-
-        # Save messages to CSV
-        try:
-            filename = save_mavlink_to_csv()
-            if filename:
-                socketio.emit('csv_saved', {'filename': filename}, namespace='/mavlink')
-        except Exception as e:
-            print(f'Error saving MAVLink messages: {str(e)}', 500)
-            socketio.emit('mavlink_error', {'message': f'Failed to save existing messages{str(e)}'}, namespace='/mavlink')
     else:
         # Start MAVLink monitoring
         data = request.get_json()
