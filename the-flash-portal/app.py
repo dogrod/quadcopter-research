@@ -2,327 +2,419 @@ import asyncio
 import signal
 import sys
 import csv
+import datetime
 import pyshark
 
-from datetime import datetime
-from dataclasses import dataclass, asdict
-from typing import List, Dict, Optional
 from threading import Thread, Event, Lock
-from pathlib import Path
-
 from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit
 from pymavlink import mavutil
 
+app = Flask(__name__)
+socketio = SocketIO(app, async_mode="threading", cors_allowed_origins="*", logger=True, engineio_logger=True)
+
+# Global variables
+# Wi-Fi
+wifi_monitoring = False
+stop_capture_event = Event()
+
+# MAVLink
+mavlink_connection = None
+mavlink_thread = None
+mavlink_stop_event = Event()
+mavlink_messages = []
+mavlink_message_lock = Lock()
+
 # Configuration
-@dataclass
-class Config:
-    WIFI_INTERFACE: str = "wlan0"
-    MAVLINK_BAUD_RATE: int = 921600
-    MAVLINK_STREAM_RATE: int = 10
-    DATA_DIR: Path = Path("/data")
+WIFI_INTERFACE = "wlan0"
+
+async def close_capture(capture):
+    """Async helper to close the capture properly."""
+    try:
+        await capture.close_async()
+        print("Wi-Fi capture closed successfully.")
+    except Exception as e:
+        print(f"Error while closing Wi-Fi capture: {e}")
+
+# Wi-Fi packet processing
+def start_wifi_capture():
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    pcap_filename = f'/data/wifi/ap_traffic_{timestamp}.pcap'
+
+    try:
+        capture = pyshark.LiveCapture(interface=WIFI_INTERFACE, output_file=pcap_filename)
+
+        for packet in capture.sniff_continuously():
+            if stop_capture_event.is_set():
+                break
+            try:
+                data = {
+                    "source_ip": packet.ip.src,
+                    "destination_ip": packet.ip.dst,
+                    "protocol": packet.transport_layer,
+                    # "info": str(packet),
+                    "length": packet.length,
+                }
+                print(f"Emitting wifi_packet event: {data}")
+                socketio.emit("wifi_packet", data, namespace="/wifi")
+                socketio.sleep(0.1)
+            except AttributeError:
+                # Some packets may not have IP layer
+                continue
+    except Exception as e:
+        print(f"Error during packet capture: {e}")
+        socketio.emit('error', {'message': str(e)}, namespace='/wifi')
+    finally:
+        # Ensure capture is closed properly
+        print("Closing Wi-Fi capture...")
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(close_capture(capture))
+        loop.close()
+
+        print(f"Wi-Fi capture stopped and saved to {pcap_filename}")
+        socketio.emit('capture_saved', {'filename': pcap_filename}, namespace='/wifi')
+
+def configure_mavlink_streams(master):
+    """
+    Configure MAVLink stream rates for different message types
+    See: https://github.com/ArduPilot/pymavlink/blob/master/tools/mavtelemetry_datarates.py
+    And: https://github.com/ArduPilot/pymavlink/blob/6b4dd1eca2a8069e540c51135c4ef7549c517f84/generator/swift/Tests/MAVLinkTests/Testdata/common.xml
+    """
+    # Define the messages we want to receive more frequently
+    # Rate of 10Hz (10 messages per second)
+    rate = 10
     
-    def __post_init__(self):
-        # Ensure data directories exist
-        (self.DATA_DIR / "wifi").mkdir(parents=True, exist_ok=True)
-        (self.DATA_DIR / "mavlink").mkdir(parents=True, exist_ok=True)
+    # Request streams
 
-class MonitoringState:
-    def __init__(self):
-        self.wifi_monitoring = False
-        self.stop_capture_event = Event()
-        self.mavlink_connection: Optional[mavutil.mavlink_connection] = None
-        self.mavlink_thread: Optional[Thread] = None
-        self.mavlink_stop_event = Event()
-        self.mavlink_messages: List[Dict] = []
-        self.mavlink_message_lock = Lock()
+    # EXT_STAT
+    # GPS_STATUS, CONTROL_STATUS, AUX_STATUS
+    master.mav.request_data_stream_send(
+        master.target_system,
+        master.target_component,
+        mavutil.mavlink.MAV_DATA_STREAM_EXTENDED_STATUS,
+        rate,
+        1  # Start sending
+    )
 
-class MonitoringApp:
-    def __init__(self):
-        self.config = Config()
-        self.state = MonitoringState()
-        self.app = Flask(__name__)
-        self.socketio = SocketIO(
-            self.app,
-            async_mode="threading",
-            cors_allowed_origins="*",
-            logger=True,
-            engineio_logger=True
-        )
-        self._setup_routes()
-        self._setup_socketio()
-        self._setup_signal_handlers()
+    # POSITION
+    # LOCAL_POSITION, GLOBAL_POSITION/GLOBAL_POSITION_INT
+    master.mav.request_data_stream_send(
+        master.target_system,
+        master.target_component,
+        mavutil.mavlink.MAV_DATA_STREAM_POSITION,
+        rate,
+        1  # Start sending
+    )
+    
+    # Extra 1
+    # Attitude data
+    master.mav.request_data_stream_send(
+        master.target_system,
+        master.target_component,
+        mavutil.mavlink.MAV_DATA_STREAM_EXTRA1,
+        rate,
+        1
+    )
+    
+    # Extra 2
+    # VFR_HUD data
+    # master.mav.request_data_stream_send(
+    #     master.target_system,
+    #     master.target_component,
+    #     mavutil.mavlink.MAV_DATA_STREAM_EXTRA2,
+    #     rate,
+    #     1
+    # )
 
-    def _index(self):
-        return render_template("index.html")
+    # Extra 3
+    # RANGEFINDER / BATTERY e.t.c.
+    master.mav.request_data_stream_send(
+        master.target_system,
+        master.target_component,
+        mavutil.mavlink.MAV_DATA_STREAM_EXTRA3,
+        rate,
+        1
+    )
+    
+    # Raw sensor data
+    master.mav.request_data_stream_send(
+        master.target_system,
+        master.target_component,
+        mavutil.mavlink.MAV_DATA_STREAM_RAW_SENSORS,
+        rate,
+        1
+    )
 
-    def _dashboard(self):
-        return render_template("dashboard.html")
+    print("MAVLink streams configured.")
 
-    def _wifi_page(self):
-        return render_template("wifi.html")
+# MAVLink message processing
+def mavlink_listener(connection_string):
+    """
+    Listen for MAVLink messages and handle the connection.
+    """
+    global mavlink_connection, mavlink_messages
 
-    def _mavlink_page(self):
-        return render_template("mavlink.html")
+    try:
+        with mavlink_message_lock:
+            if mavlink_messages:
+                try:
+                    filename = save_mavlink_to_csv()
+                    if filename:
+                        socketio.emit('csv_saved', {'filename': filename}, namespace='/mavlink')
+                except Exception as e:
+                    print(f"Error saving MAVLink messages: {str(e)}")
+                    socketio.emit('mavlink_error', {'message': f'Failed to save existing messages{str(e)}'}, namespace='/mavlink')
+                    return
 
-    def _setup_routes(self):
-        # Basic routes with named functions
-        self.app.add_url_rule("/", "index", self._index)
-        self.app.add_url_rule("/dashboard", "dashboard", self._dashboard)
-        self.app.add_url_rule("/wifi", "wifi_tab", self._wifi_page)
-        self.app.add_url_rule("/mavlink", "mavlink_tab", self._mavlink_page)
+        # Establish MAVLink connection
+        print(f"Attempting to establish MAVLink connection to {connection_string}")
+        baud_rate = 921600
+        mavlink_connection = mavutil.mavlink_connection(connection_string, baud=baud_rate)
+        print(f"Established MAVLink connection to {connection_string}")
+
+        configure_mavlink_streams(mavlink_connection)
         
-        # Control routes
-        self.app.add_url_rule(
-            "/toggle_wifi_monitoring",
-            "toggle_wifi_monitoring",
-            self._toggle_wifi_monitor,
-            methods=["POST"]
-        )
-        self.app.add_url_rule(
-            "/toggle_mavlink_monitor",
-            "toggle_mavlink_monitor",
-            self._toggle_mavlink_monitor,
-            methods=["POST"]
-        )
-        self.app.add_url_rule(
-            "/toggle_monitoring",
-            "toggle_monitoring",
-            self._toggle_monitoring,
-            methods=["POST"]
-        )
-
-    def _setup_socketio(self):
-        @self.socketio.on("connect", namespace="/wifi")
-        def wifi_connect():
-            print("WiFi client connected")
-            emit("wifi_status", {"monitoring": self.state.wifi_monitoring})
-
-        @self.socketio.on("connect", namespace="/mavlink")
-        def mavlink_connect():
-            print("MAVLink client connected")
-            status = 'Connected' if (self.state.mavlink_thread and 
-                                   self.state.mavlink_thread.is_alive()) else 'Disconnected'
-            emit('mavlink_status', {'status': status})
-
-    async def _process_wifi_packet(self, packet):
-        try:
-            data = {
-                "source_ip": packet.ip.src,
-                "destination_ip": packet.ip.dst,
-                "protocol": packet.transport_layer,
-                "length": packet.length,
-            }
-            self.socketio.emit("wifi_packet", data, namespace="/wifi")
-        except AttributeError:
-            pass  # Skip packets without IP layer
-
-    async def start_wifi_capture(self):
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        pcap_file = self.config.DATA_DIR / "wifi" / f'ap_traffic_{timestamp}.pcap'
+        # Wait for heartbeat to ensure connection is established
+        print("Waiting for heartbeat...")
+        mavlink_connection.wait_heartbeat()
+        print("Heartbeat received. Connection successful.", mavlink_connection.target_system, mavlink_connection.target_component)
+        socketio.emit('mavlink_status', {'status': 'Connected'}, namespace='/mavlink')
         
+        message_count = 0
+
+        while not mavlink_stop_event.is_set():
+            # Listen for MAVLink messages
+            msg = mavlink_connection.recv_match(blocking=False)
+            if msg:
+                # Convert message to dictionary
+                msg_dict = msg.to_dict()
+                print(f"Received MAVLink message: {msg_dict}")
+                message_count += 1
+                mavlink_messages.append(msg_dict)  # Store the message
+
+                # Emit MAVLink message to client
+                socketio.emit('mavlink_message', msg_dict, namespace='/mavlink')
+                socketio.emit('mavlink_message_count', {'count': message_count}, namespace='/mavlink')
+            else:
+                socketio.sleep(0.1)
+
+    except Exception as e:
+        print(f"Error in MAVLink listener: {e}")
+        socketio.emit('mavlink_error', {'message': str(e)}, namespace='/mavlink')
+    finally:
+        if mavlink_connection:
+            mavlink_connection.close()
+            print("MAVLink connection closed.")
+            socketio.emit('mavlink_status', {'status': 'Disconnected'}, namespace='/mavlink')
+
+def save_mavlink_to_csv():
+    """
+    Save MAVLink messages to CSV and clear the messages list.
+    Returns:
+        str: Path to saved CSV file or None if no messages to save
+    """
+    global mavlink_messages
+
+    with mavlink_message_lock:
+        if not mavlink_messages:
+            return None
+
+        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"/data/mavlink/mavlink_data_{timestamp}.csv"
+
         try:
-            capture = pyshark.LiveCapture(
-                interface=self.config.WIFI_INTERFACE,
-                output_file=str(pcap_file)
-            )
-            
-            for packet in capture.sniff_continuously():
-                if self.state.stop_capture_event.is_set():
-                    break
-                await self._process_wifi_packet(packet)
-                await asyncio.sleep(0.1)
-                
-        except Exception as e:
-            print(f"Error during packet capture: {e}")
-            self.socketio.emit('error', {'message': str(e)}, namespace='/wifi')
-        finally:
-            await capture.close_async()
-            print(f"WiFi capture stopped and saved to {pcap_file}")
-            self.socketio.emit('capture_saved', {'filename': str(pcap_file)}, namespace='/wifi')
+            fieldnames = sorted(set().union(*(message.keys() for message in mavlink_messages)))
 
-    def configure_mavlink_streams(self, master):
-        """Configure MAVLink stream rates"""
-        stream_types = [
-            mavutil.mavlink.MAV_DATA_STREAM_EXTENDED_STATUS,
-            mavutil.mavlink.MAV_DATA_STREAM_POSITION,
-            mavutil.mavlink.MAV_DATA_STREAM_EXTRA1,
-            mavutil.mavlink.MAV_DATA_STREAM_EXTRA3,
-            mavutil.mavlink.MAV_DATA_STREAM_RAW_SENSORS
-        ]
-        
-        for stream_type in stream_types:
-            master.mav.request_data_stream_send(
-                master.target_system,
-                master.target_component,
-                stream_type,
-                self.config.MAVLINK_STREAM_RATE,
-                1
-            )
+            # Use a larger buffer size for better I/O performance
+            with open(filename, mode='w', newline='', buffering=8192) as file:
+                writer = csv.DictWriter(file, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(mavlink_messages)
 
-    def save_mavlink_messages(self) -> Optional[str]:
-        with self.state.mavlink_message_lock:
-            if not self.state.mavlink_messages:
-                return None
-
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            filename = self.config.DATA_DIR / "mavlink" / f"mavlink_data_{timestamp}.csv"
-
-            try:
-                fieldnames = sorted(set().union(*(msg.keys() for msg in self.state.mavlink_messages)))
-                with open(filename, mode='w', newline='', buffering=8192) as file:
-                    writer = csv.DictWriter(file, fieldnames=fieldnames)
-                    writer.writeheader()
-                    writer.writerows(self.state.mavlink_messages)
-                return str(filename)
-            except Exception as e:
-                print(f"Error saving MAVLink messages: {e}")
-                raise
-
-    def mavlink_listener(self, connection_string: str):
-        try:
-            self.state.mavlink_connection = mavutil.mavlink_connection(
-                connection_string,
-                baud=self.config.MAVLINK_BAUD_RATE
-            )
-            self.configure_mavlink_streams(self.state.mavlink_connection)
-            
-            self.state.mavlink_connection.wait_heartbeat()
-            self.socketio.emit('mavlink_status', {'status': 'Connected'}, namespace='/mavlink')
-            
-            message_count = 0
-            while not self.state.mavlink_stop_event.is_set():
-                msg = self.state.mavlink_connection.recv_match(blocking=False)
-                if msg:
-                    msg_dict = msg.to_dict()
-                    message_count += 1
-                    with self.state.mavlink_message_lock:
-                        self.state.mavlink_messages.append(msg_dict)
-                    
-                    self.socketio.emit('mavlink_message', msg_dict, namespace='/mavlink')
-                    self.socketio.emit('mavlink_message_count', 
-                                     {'count': message_count}, 
-                                     namespace='/mavlink')
-                else:
-                    self.socketio.sleep(0.1)
+            print(f"Successfully saved {len(mavlink_messages)} messages to {filename}")
+            return filename
 
         except Exception as e:
-            print(f"Error in MAVLink listener: {e}")
-            self.socketio.emit('mavlink_error', {'message': str(e)}, namespace='/mavlink')
-        finally:
-            if self.state.mavlink_connection:
-                self.state.mavlink_connection.close()
-                self.socketio.emit('mavlink_status', {'status': 'Disconnected'}, 
-                                 namespace='/mavlink')
+            print(f"Error saving MAVLink messages: {str(e)}")
+            raise
 
-    def _toggle_wifi_monitor(self):
-        if self.state.wifi_monitoring:
-            self.state.stop_capture_event.set()
-        else:
-            self.state.stop_capture_event.clear()
-            self.socketio.start_background_task(self.start_wifi_capture)
-        
-        self.state.wifi_monitoring = not self.state.wifi_monitoring
-        self.socketio.emit("wifi_status", 
-                          {"monitoring": self.state.wifi_monitoring}, 
-                          namespace="/wifi")
-        return "", 204
+# Routes
+@app.route("/")
+def index():
+    return render_template("index.html")
 
-    def _toggle_mavlink_monitor(self):
-        # First, check if there are existing messages that need to be saved
-        # This logic is outside the if block to ensure that messages are saved
-        # Avoid the MAVLink thread is stopped unexpectedly
-        if self.state.mavlink_messages:
-            try:
-                if filename := self.save_mavlink_messages():
-                    print(f"Saved existing messages to {filename}")
-                    self.socketio.emit('csv_saved', {'filename': filename}, 
-                                        namespace='/mavlink')
-                # Clear the messages after saving
-                self.state.mavlink_messages.clear()
-            except Exception as e:
-                error_msg = f'Failed to save existing messages: {e}'
-                print(error_msg)
-                self.socketio.emit('mavlink_error', 
-                                    {'message': error_msg}, 
-                                    namespace='/mavlink')
-                return 'Failed to save existing messages', 500
+@app.route("/dashboard")
+def dashboard():
+    return render_template("dashboard.html")
 
-        if self.state.mavlink_thread and self.state.mavlink_thread.is_alive():
-            self.state.mavlink_stop_event.set()
-            self.state.mavlink_thread.join()
-            self.state.mavlink_thread = None
-        else:
-            connection_string = request.get_json().get('connection_string', '').strip()
-            if not connection_string:
-                return 'Connection string required', 400
+@app.route("/wifi")
+def wifi_tab():
+    return render_template("wifi.html")
 
-            self.state.mavlink_stop_event.clear()
-            self.state.mavlink_thread = Thread(
-                target=self.mavlink_listener,
-                args=(connection_string,)
-            )
-            self.state.mavlink_thread.start()
+@app.route("/mavlink")
+def mavlink_tab():
+    return render_template("mavlink.html")
 
-        status = ('Connected' if self.state.mavlink_thread and 
-                 self.state.mavlink_thread.is_alive() else 'Disconnected')
-        self.socketio.emit('mavlink_status',
-                          {'monitoring': bool(self.state.mavlink_thread), 
-                           'status': status},
-                          namespace='/mavlink')
-        return '', 204
+@app.route("/toggle_wifi_monitoring", methods=["POST"])
+def toggle_wifi_monitor():
+    global wifi_monitoring, stop_capture_event
 
-    def _toggle_monitoring(self):
+    if wifi_monitoring:
+        # Stop Wi-Fi monitoring
+        print("Stopping Wi-Fi monitoring...")
+        stop_capture_event.set()
+        wifi_monitoring = False
+    else:
+        # Start Wi-Fi monitoring
+        print("Starting Wi-Fi monitoring...")
+        stop_capture_event.clear()
+        wifi_monitoring = True
+        # Start the packet capture in a new thread with application context
+        socketio.start_background_task(start_wifi_capture)
+
+    socketio.emit("wifi_status", {"monitoring": wifi_monitoring}, namespace="/wifi")
+    return ("", 204)
+
+@app.route('/toggle_mavlink_monitor', methods=['POST'])
+def toggle_mavlink_monitor():
+    global mavlink_thread, mavlink_stop_event
+    
+    if mavlink_thread and mavlink_thread.is_alive():
+        # Stop MAVLink monitoring
+        print("Stopping MAVLink monitoring...")
+        mavlink_stop_event.set()
+        mavlink_thread.join()
+        mavlink_thread = None
+        mavlink_stop_event.clear()
+
+        # Save messages to CSV
+        try:
+            filename = save_mavlink_to_csv()
+            if filename:
+                socketio.emit('csv_saved', {'filename': filename}, namespace='/mavlink')
+        except Exception as e:
+            print(f'Error saving MAVLink messages: {str(e)}', 500)
+            socketio.emit('mavlink_error', {'message': f'Failed to save existing messages{str(e)}'}, namespace='/mavlink')
+    else:
+        # Start MAVLink monitoring
+        data = request.get_json()
+        connection_string = data.get('connection_string', '').strip()
+        if not connection_string:
+            return ('Connection string is required', 400)
+
+        print(f"Starting MAVLink monitoring with connection string: {connection_string}")
+        mavlink_stop_event.clear()
+        mavlink_thread = Thread(target=mavlink_listener, args=(connection_string,))
+        mavlink_thread.start()
+
+    # Determine the current status after toggling
+    status = 'Connected' if mavlink_thread and mavlink_thread.is_alive() else 'Disconnected'
+    monitoring_state = bool(mavlink_thread)
+
+    # Emit the updated status to the client
+    socketio.emit('mavlink_status',
+                  {'monitoring': monitoring_state, 'status': status},
+                  namespace='/mavlink')
+    
+    return ('', 204)
+
+# Combined Monitoring Logic (Start/Stop Both)
+@app.route("/toggle_monitoring", methods=["POST"])
+def toggle_monitoring():
+    global wifi_monitoring
+
+    if wifi_monitoring and (mavlink_thread and mavlink_thread.is_alive()):
+        # Stop both monitors
+        print("Stopping both Wi-Fi and MAVLink monitoring...")
+        stop_capture_event.set()
+        mavlink_stop_event.set()
+        if mavlink_thread:
+            mavlink_thread.join()
+        mavlink_thread = None
+        wifi_monitoring = False
+    else:
+        # Start both monitors
+        print("Starting both Wi-Fi and MAVLink monitoring...")
+        stop_capture_event.clear()
+        mavlink_stop_event.clear()
+        wifi_monitoring = True
+        socketio.start_background_task(lambda: start_wifi_capture())
+
+        # Start MAVLink monitoring with default connection (or adjust as needed)
         connection_string = request.get_json().get("connection_string", "").strip()
         if not connection_string:
-            return "Connection string required", 400
+            return ("Connection string is required", 400)
+        mavlink_thread = Thread(target=mavlink_listener, args=(connection_string,))
+        mavlink_thread.start()
+    return ("", 204)
 
-        if self.state.wifi_monitoring and (self.state.mavlink_thread and 
-                                         self.state.mavlink_thread.is_alive()):
-            self.state.stop_capture_event.set()
-            self.state.mavlink_stop_event.set()
-            if self.state.mavlink_thread:
-                self.state.mavlink_thread.join()
-            self.state.mavlink_thread = None
-            self.state.wifi_monitoring = False
-        else:
-            self.state.stop_capture_event.clear()
-            self.state.mavlink_stop_event.clear()
-            self.state.wifi_monitoring = True
-            self.socketio.start_background_task(self.start_wifi_capture)
-            self.state.mavlink_thread = Thread(
-                target=self.mavlink_listener,
-                args=(connection_string,)
-            )
-            self.state.mavlink_thread.start()
-        return "", 204
+# SocketIO Namespaces
+@socketio.on("connect", namespace="/wifi")
+def wifi_connect():
+    print("Wi-Fi client connected")
+    emit("wifi_status", {"monitoring": wifi_monitoring})
 
-    def _setup_signal_handlers(self):
-        def signal_handler(sig, frame):
-            print("Gracefully shutting down...")
-            self.cleanup()
-            sys.exit(0)
+@socketio.on("connect", namespace="/mavlink")
+def mavlink_connect():
+    print("MAVLink client connected")
+    status = 'Connected' if mavlink_thread and mavlink_thread.is_alive() else 'Disconnected'
+    emit('mavlink_status', {'status': status})
 
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
+def stop_threads():
+    print("Stopping threads...")
+    # Stop Wi-Fi monitoring if running
+    if wifi_monitoring:
+        print("Stopping Wi-Fi monitoring...")
+        stop_capture_event.set()
 
-    def cleanup(self):
-        """Clean up resources before shutdown"""
-        if self.state.wifi_monitoring:
-            self.state.stop_capture_event.set()
+    # Stop MAVLink monitoring if running
+    if mavlink_thread and mavlink_thread.is_alive():
+        print("Stopping MAVLink monitoring...")
+        mavlink_stop_event.set()
+        mavlink_thread.join()
+        print("MAVLink monitoring stopped.")
 
-        if self.state.mavlink_thread and self.state.mavlink_thread.is_alive():
-            self.state.mavlink_stop_event.set()
-            self.state.mavlink_thread.join()
+def stop_event_loop(loop):
+    """Stop and close the event loop gracefully."""
+    try:
+        if not loop.is_closed():
+            print("Stopping event loop...")
+            pending_tasks = [t for t in asyncio.all_tasks(loop) if not t.done()]
+            for task in pending_tasks:
+                task.cancel()
+                try:
+                    loop.run_until_complete(task)
+                except asyncio.CancelledError:
+                    print(f"Cancelled task: {task}")
 
-    def run(self, host="0.0.0.0", port=5001):
-        try:
-            self.socketio.run(self.app, host=host, port=port)
-        except KeyboardInterrupt:
-            print("Server interrupted by user. Shutting down...")
-            self.cleanup()
-            sys.exit(0)
+            loop.run_until_complete(loop.shutdown_asyncgens())
+            loop.close()
+            print("Event loop closed.")
+    except RuntimeError as e:
+        print(f"Error closing event loop: {e}")
+
+def signal_handler(sig, frame):
+    print("Gracefully shutting down...")
+
+    stop_threads()
+
+    # Stop the asyncio event loop
+    loop = asyncio.get_event_loop()
+    stop_event_loop(loop)
+
+    sys.exit(0)
+
+# Register signal handlers
+signal.signal(signal.SIGINT, signal_handler)  # Handle Ctrl+C
+signal.signal(signal.SIGTERM, signal_handler)  # Handle termination signals
 
 if __name__ == "__main__":
-    app = MonitoringApp()
-    app.run()
+    try:
+        # Start the Flask-SocketIO app
+        socketio.run(app, host="0.0.0.0", port=5001)
+    except KeyboardInterrupt:
+        print("Server interrupted by user. Shutting down...")
+        loop = asyncio.get_event_loop()
+        stop_event_loop(loop)
+        sys.exit(0)
