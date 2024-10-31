@@ -53,17 +53,44 @@ class MonitoringApp:
         self._setup_socketio()
         self._setup_signal_handlers()
 
+    def _index(self):
+        return render_template("index.html")
+
+    def _dashboard(self):
+        return render_template("dashboard.html")
+
+    def _wifi_page(self):
+        return render_template("wifi.html")
+
+    def _mavlink_page(self):
+        return render_template("mavlink.html")
+
     def _setup_routes(self):
-        # Basic routes
-        self.app.route("/")(lambda: render_template("index.html"))
-        self.app.route("/dashboard")(lambda: render_template("dashboard.html"))
-        self.app.route("/wifi")(lambda: render_template("wifi.html"))
-        self.app.route("/mavlink")(lambda: render_template("mavlink.html"))
+        # Basic routes with named functions
+        self.app.add_url_rule("/", "index", self._index)
+        self.app.add_url_rule("/dashboard", "dashboard", self._dashboard)
+        self.app.add_url_rule("/wifi", "wifi", self._wifi_page)
+        self.app.add_url_rule("/mavlink", "mavlink", self._mavlink_page)
         
         # Control routes
-        self.app.route("/toggle_wifi_monitoring", methods=["POST"])(self._toggle_wifi_monitor)
-        self.app.route("/toggle_mavlink_monitor", methods=["POST"])(self._toggle_mavlink_monitor)
-        self.app.route("/toggle_monitoring", methods=["POST"])(self._toggle_monitoring)
+        self.app.add_url_rule(
+            "/toggle_wifi_monitoring",
+            "toggle_wifi_monitoring",
+            self._toggle_wifi_monitor,
+            methods=["POST"]
+        )
+        self.app.add_url_rule(
+            "/toggle_mavlink_monitor",
+            "toggle_mavlink_monitor",
+            self._toggle_mavlink_monitor,
+            methods=["POST"]
+        )
+        self.app.add_url_rule(
+            "/toggle_monitoring",
+            "toggle_monitoring",
+            self._toggle_monitoring,
+            methods=["POST"]
+        )
 
     def _setup_socketio(self):
         @self.socketio.on("connect", namespace="/wifi")
