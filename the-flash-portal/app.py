@@ -69,8 +69,8 @@ class MonitoringApp:
         # Basic routes with named functions
         self.app.add_url_rule("/", "index", self._index)
         self.app.add_url_rule("/dashboard", "dashboard", self._dashboard)
-        self.app.add_url_rule("/wifi", "wifi", self._wifi_page)
-        self.app.add_url_rule("/mavlink", "mavlink", self._mavlink_page)
+        self.app.add_url_rule("/wifi", "wifi_tab", self._wifi_page)
+        self.app.add_url_rule("/mavlink", "mavlink_tab", self._mavlink_page)
         
         # Control routes
         self.app.add_url_rule(
