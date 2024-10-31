@@ -195,6 +195,8 @@ class MonitoringApp:
                 msg = self.state.mavlink_connection.recv_match(blocking=False)
                 if msg:
                     msg_dict = msg.to_dict()
+                    # Add timestamp to message
+                    msg_dict['ts'] = datetime.now().isoformat()
                     message_count += 1
                     with self.state.mavlink_message_lock:
                         self.state.mavlink_messages.append(msg_dict)
