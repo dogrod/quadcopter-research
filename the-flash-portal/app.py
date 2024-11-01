@@ -55,7 +55,7 @@ def start_wifi_capture():
                     # "info": str(packet),
                     "length": packet.length,
                 }
-                print(f"Emitting wifi_packet event: {data}")
+                # print(f"Emitting wifi_packet event: {data}")
                 socketio.emit("wifi_packet", data, namespace="/wifi")
                 socketio.sleep(0.1)
             except AttributeError:
@@ -180,7 +180,7 @@ def mavlink_listener(connection_string):
                 msg_dict = msg.to_dict()
                 # Add timestamp to message
                 msg_dict['ts'] = datetime.datetime.now().isoformat()
-                print(f"Received MAVLink message: {msg_dict}")
+                # print(f"Received MAVLink message: {msg_dict}")
                 message_count += 1
                 mavlink_messages.append(msg_dict)  # Store the message
 
