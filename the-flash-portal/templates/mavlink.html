@@ -59,7 +59,7 @@
         var xhr = new XMLHttpRequest();
         xhr.open('POST', '/toggle_mavlink_monitor', true);
         xhr.setRequestHeader('Content-Type', 'application/json;charset=UTF-8');
-        xhr.send(JSON.stringify({ 'connection_string': connectionString }));
+        xhr.send(JSON.stringify({ 'connection_string': connectionString, 'emit_message': true }));
 
         monitoring = !monitoring;
         updateButton();

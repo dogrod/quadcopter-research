@@ -24,6 +24,8 @@ mavlink_thread = None
 mavlink_stop_event = Event()
 mavlink_messages = []
 mavlink_message_lock = Lock()
+# If True, emit MAVLink messages to the client, will reduce performance
+mavlink_emit_message = False
 
 # Configuration
 WIFI_INTERFACE = "wlan0"
@@ -153,7 +155,7 @@ def mavlink_listener(connection_string):
     """
     Listen for MAVLink messages and handle the connection.
     """
-    global mavlink_connection, mavlink_messages
+    global mavlink_connection, mavlink_messages, mavlink_emit_message
 
     try:
         # Establish MAVLink connection
@@ -184,9 +186,10 @@ def mavlink_listener(connection_string):
                 message_count += 1
                 mavlink_messages.append(msg_dict)  # Store the message
 
-                # Emit MAVLink message to client
-                # socketio.emit('mavlink_message', msg_dict, namespace='/mavlink')
                 socketio.emit('mavlink_message_count', {'count': message_count}, namespace='/mavlink')
+                # Emit MAVLink message to client
+                if mavlink_emit_message:
+                    socketio.emit('mavlink_message', make_json_serializable(msg_dict), namespace='/mavlink')
             else:
                 socketio.sleep(0.1)
 
@@ -284,7 +287,7 @@ def toggle_wifi_monitor():
 
 @app.route('/toggle_mavlink_monitor', methods=['POST'])
 def toggle_mavlink_monitor():
-    global mavlink_thread, mavlink_stop_event
+    global mavlink_thread, mavlink_stop_event, mavlink_emit_message
 
     # Check if mavlink_message list is not empty
     if mavlink_messages:
@@ -307,12 +310,16 @@ def toggle_mavlink_monitor():
         mavlink_thread.join()
         mavlink_thread = None
         mavlink_stop_event.clear()
+        mavlink_emit_message = False
     else:
         # Start MAVLink monitoring
         data = request.get_json()
         connection_string = data.get('connection_string', '').strip()
         if not connection_string:
             return ('Connection string is required', 400)
+        
+        emit_message = data.get('emit_message', False)
+        mavlink_emit_message = emit_message
 
         print(f"Starting MAVLink monitoring with connection string: {connection_string}")
         mavlink_stop_event.clear()
