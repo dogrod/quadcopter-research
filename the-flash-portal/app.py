@@ -185,7 +185,7 @@ def mavlink_listener(connection_string):
                 mavlink_messages.append(msg_dict)  # Store the message
 
                 # Emit MAVLink message to client
-                socketio.emit('mavlink_message', msg_dict, namespace='/mavlink')
+                # socketio.emit('mavlink_message', msg_dict, namespace='/mavlink')
                 socketio.emit('mavlink_message_count', {'count': message_count}, namespace='/mavlink')
             else:
                 socketio.sleep(0.1)
@@ -198,6 +198,19 @@ def mavlink_listener(connection_string):
             mavlink_connection.close()
             print("MAVLink connection closed.")
             socketio.emit('mavlink_status', {'status': 'Disconnected'}, namespace='/mavlink')
+
+
+# Make JSON serializable
+# Fix "Error in MAVLink listener: Object of type bytearray is not JSON serializable" when emit
+def make_json_serializable(obj):
+    if isinstance(obj, dict):
+        return {k: make_json_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [make_json_serializable(v) for v in obj]
+    elif isinstance(obj, bytearray):
+        return list(obj)
+    else:
+        return obj
 
 def save_mavlink_to_csv():
     """
@@ -215,15 +228,17 @@ def save_mavlink_to_csv():
         filename = f"/data/mavlink/mavlink_data_{timestamp}.csv"
 
         try:
-            fieldnames = sorted(set().union(*(message.keys() for message in mavlink_messages)))
+            serialized_messages = [make_json_serializable(msg) for msg in mavlink_messages]
+
+            fieldnames = sorted(set().union(*(message.keys() for message in serialized_messages)))
 
             # Use a larger buffer size for better I/O performance
             with open(filename, mode='w', newline='', buffering=8192) as file:
                 writer = csv.DictWriter(file, fieldnames=fieldnames)
                 writer.writeheader()
-                writer.writerows(mavlink_messages)
+                writer.writerows(serialized_messages)
 
-            print(f"Successfully saved {len(mavlink_messages)} messages to {filename}")
+            print(f"Successfully saved {len(serialized_messages)} messages to {filename}")
             return filename
 
         except Exception as e:
