@@ -3,7 +3,8 @@
 <head>
     <title>Drone Monitoring App</title>
     <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='styles.css') }}">
-    <script src="//cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="{{ url_for('static', filename='socket.io.min.js') }}"></script>
+    <!-- <script src="//cdn.socket.io/4.5.4/socket.io.min.js"></script> -->
 </head>
 <body>
     <nav>
