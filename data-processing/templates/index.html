@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MAVLink Anomaly Simulator</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        .checkbox-group {
+            margin: 10px 0;
+        }
+        .checkbox-group label {
+            font-weight: normal;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .alert {
+            padding: 10px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+            display: none;
+        }
+        .alert-error {
+            background-color: #ffebee;
+            color: #c62828;
+            border: 1px solid #ef9a9a;
+        }
+        .alert-success {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+            border: 1px solid #a5d6a7;
+        }
+        #uploadSpinner {
+            display: none;
+            margin-left: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>MAVLink Anomaly Simulator</h1>
+        
+        <div id="errorAlert" class="alert alert-error"></div>
+        <div id="successAlert" class="alert alert-success"></div>
+        
+        <form id="uploadForm" action="/process" method="post" enctype="multipart/form-data">
+            <div class="form-group">
+                <label for="file">Upload MAVLink CSV File:</label>
+                <input type="file" id="file" name="file" accept=".csv" required>
+            </div>
+            
+            <div class="form-group">
+                <label>Select Anomalies to Inject:</label>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="gps_jump" name="anomaly_types" value="gps_jump">
+                    <label for="gps_jump">GPS Position Jump</label>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="gps_drift" name="anomaly_types" value="gps_drift">
+                    <label for="gps_drift">GPS Gradual Drift</label>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="rangefinder_noise" name="anomaly_types" value="rangefinder_noise">
+                    <label for="rangefinder_noise">Rangefinder Noise</label>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="rangefinder_failure" name="anomaly_types" value="rangefinder_failure">
+                    <label for="rangefinder_failure">Rangefinder Failure</label>
+                </div>
+            </div>
+            
+            <button type="submit">Process and Download
+                <span id="uploadSpinner">⌛</span>
+            </button>
+        </form>
+    </div>
+
+    <script>
+        document.getElementById('uploadForm').onsubmit = function() {
+            const fileInput = document.getElementById('file');
+            const errorAlert = document.getElementById('errorAlert');
+            const spinner = document.getElementById('uploadSpinner');
+            
+            if (!fileInput.files.length) {
+                errorAlert.textContent = 'Please select a file to upload.';
+                errorAlert.style.display = 'block';
+                return false;
+            }
+            
+            const anomalyTypes = document.querySelectorAll('input[name="anomaly_types"]:checked');
+            if (!anomalyTypes.length) {
+                errorAlert.textContent = 'Please select at least one anomaly type.';
+                errorAlert.style.display = 'block';
+                return false;
+            }
+            
+            spinner.style.display = 'inline';
+            errorAlert.style.display = 'none';
+            return true;
+        };
+    </script>
+</body>
+</html>
