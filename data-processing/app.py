@@ -38,6 +38,9 @@ def inject_gps_position_jump(df, jump_size=100):
             df.loc[idx, 'eph'] *= 1.5    # Increase HDOP
             df.loc[idx, 'epv'] *= 1.5    # Increase VDOP
             
+            # Set anomaly label
+            df.loc[idx, 'anomaly_label'] = 1
+            
     return df
 
 def inject_gps_drift(df, drift_rate=0.1):
@@ -74,6 +77,10 @@ def inject_gps_drift(df, drift_rate=0.1):
         df.loc[idx, 'satellites_visible'] = max(4, 
             df.loc[idx, 'satellites_visible'] - int(drift_factor * 3))
             
+        # Set anomaly label if drift is significant
+        if drift_factor > 0.01:  # Only label if drift is noticeable
+            df.loc[idx, 'anomaly_label'] = 1
+            
     return df
 
 def inject_rangefinder_noise(df, noise_std=0.5):
@@ -104,6 +111,10 @@ def inject_rangefinder_noise(df, noise_std=0.5):
             df.loc[idx, 'terrain_height'] += noise / 2
             df.loc[idx, 'terrain_alt_variance'] *= 1.2
             
+        # Set anomaly label if noise is significant
+        if abs(noise) > current_dist * 0.1:  # 10% threshold
+            df.loc[idx, 'anomaly_label'] = 1
+            
     return df
 
 def inject_rangefinder_failure(df, failure_duration=100):
@@ -132,6 +143,9 @@ def inject_rangefinder_failure(df, failure_duration=100):
             df.loc[idx, 'terrain_height'] = np.nan
             df.loc[idx, 'terrain_alt_variance'] = 999999
             
+        # Set anomaly label for failure period
+        df.loc[idx, 'anomaly_label'] = 1
+            
     return df
 
 def inject_imu_interference(df, interference_strength=1.0):
@@ -141,12 +155,15 @@ def inject_imu_interference(df, interference_strength=1.0):
         return df
         
     for idx in df[imu_msgs].index:
+        modified = False
         # Add noise to accelerometer readings
         for axis in ['xacc', 'yacc', 'zacc']:
             if axis in df.columns:
                 noise = np.random.normal(0, interference_strength * 
                     abs(df.loc[idx, axis]) * 0.1)
                 df.loc[idx, axis] += noise
+                if abs(noise) > abs(df.loc[idx, axis]) * 0.1:
+                    modified = True
         
         # Add noise to gyroscope readings
         for axis in ['xgyro', 'ygyro', 'zgyro']:
@@ -154,6 +171,12 @@ def inject_imu_interference(df, interference_strength=1.0):
                 noise = np.random.normal(0, interference_strength * 
                     abs(df.loc[idx, axis]) * 0.1)
                 df.loc[idx, axis] += noise
+                if abs(noise) > abs(df.loc[idx, axis]) * 0.1:
+                    modified = True
+                    
+        # Set anomaly label if significant interference was added
+        if modified:
+            df.loc[idx, 'anomaly_label'] = 1
                 
     return df
 
@@ -173,6 +196,9 @@ def process_file():
     try:
         # Read CSV file
         df = pd.read_csv(file)
+        
+        # Initialize anomaly label column
+        df['anomaly_label'] = -1
         
         # Get selected anomaly types and parameters
         anomaly_types = request.form.getlist('anomaly_types')
