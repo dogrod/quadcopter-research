@@ -1,232 +1,231 @@
-import numpy as np
 import pandas as pd
-from sklearn.utils import shuffle
-import datetime
-from typing import Dict, List, Union
+import argparse
+from datetime import datetime
+import random
+import numpy as np
+import sys
+from typing import Optional
 
-class ArduPilotConfig:
-    """Configuration class for Ardupilot-specific network data generation."""
-    def __init__(self):
-        # Sample sizes
-        self.normal_samples = 10000
-        self.attack_samples = {
-            'mitm': 500,
-            'dos': 500,
-            'port_scan': 500
-        }
+class BaseAttackGenerator:
+    def __init__(self, input_df: pd.DataFrame, start_time: Optional[float] = None):
+        """
+        Initialize base attack generator with simple time offset handling
         
-        # Ardupilot-specific configurations
-        self.mavlink_ports = list(range(14550, 14558))  # 14550-14557
-        self.sitl_port = 5760
-        self.common_mavlink_size = 280  # typical MAVLink packet size
-        self.heartbeat_interval = 1.0  # 1 Hz heartbeat
+        Args:
+            input_df: Input DataFrame containing network traffic
+            start_time: Optional epoch timestamp to start the attack. If not provided,
+                       current timestamp will be used.
+        """
+        self.input_df = input_df.copy()
+
+        # Add label column to input data (0 = normal traffic)
+        if 'label' not in self.input_df.columns:
+            self.input_df['label'] = 0
         
-        # Protocol distribution (based on Ardupilot typical traffic)
-        self.protocol_dist = {
-            'UDP': 0.95,  # Majority UDP for MAVLink
-            'TCP': 0.05   # Minimal TCP
-        }
+        # Calculate time offset based on start_time or current time
+        original_start = self.input_df['frame.time_epoch'].min()
+        self.start_time = start_time or datetime.now().timestamp()
         
-        # Other configurations
-        self.seed = 42
-        self.output_file = 'synthetic_ardupilot_network_data.csv'
+        # Calculate the offset needed to shift all timestamps
+        self.time_offset = self.start_time - original_start
+        
+        # Apply the time offset to all records in input_df
+        self.input_df['frame.time_epoch'] = self.input_df['frame.time_epoch'] + self.time_offset
+        
+        # Initialize NaN columns list
+        self.nan_columns = [
+            'wlan.fc.type', 'wlan.fc.subtype', 'wlan.sa', 'wlan.da', 
+            'wlan.bssid', 'radiotap.channel.freq', 'radiotap.dbm_antsignal',
+            'radiotap.datarate'
+        ]
+        
+    def _adjust_timestamps(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Adjust timestamps by adding the calculated offset
+        
+        Args:
+            df: DataFrame containing network traffic data
+            
+        Returns:
+            DataFrame with adjusted timestamps
+        """
+        # No need for complex calculations, just add the offset to all timestamps
+        df['frame.time_epoch'] = df['frame.time_epoch'] + self.time_offset
+        return df
+    
+    def _generate_ip_address(self) -> str:
+        """Generate a random IP address"""
+        return '.'.join(str(random.randint(0, 255)) for _ in range(4))
+    
+    def _preserve_nan_columns(self, packet: pd.Series) -> pd.Series:
+        """Ensure specified columns remain NaN"""
+        for col in self.nan_columns:
+            packet[col] = np.nan
+        return packet
 
-def generate_frame_data(num_samples: int, packet_size_mean: int = 280, 
-                       packet_size_std: int = 30) -> Dict[str, List]:
-    """Generate basic frame-level data with MAVLink-like characteristics."""
-    return {
-        'frame.time_epoch': [datetime.datetime.now().timestamp() + i * 0.001 
-                            for i in range(num_samples)],
-        'frame.len': np.random.normal(packet_size_mean, packet_size_std, 
-                                    num_samples).astype(int),
-        'frame.protocols': ['eth:ethertype:ip:udp'] * num_samples,
-        '_ws.col.protocol': ['UDP'] * num_samples
-    }
+class DoSAttackGenerator(BaseAttackGenerator):
+    def generate(self, duration_seconds: int = 300) -> pd.DataFrame:
+        """Generate DoS attack traffic"""
+        target_row = self.input_df[pd.notna(self.input_df['ip.dst'])].sample(n=1).iloc[0]
+        
+        attack_packets = []
+        packet_interval = 0.001  # 1ms between packets
+        num_packets = int(duration_seconds * 1000)  # 1000 packets per second
+        
+        current_time = self.start_time  # Start from the adjusted start time
+        seq_num = random.randint(1000000, 9999999)
+        
+        for _ in range(num_packets):
+            packet = target_row.copy()
+            # Set attack label
+            packet['label'] = 1
 
-def generate_normal_traffic(num_samples: int, config: ArduPilotConfig) -> pd.DataFrame:
-    """Generate synthetic normal Ardupilot traffic data."""
-    data = pd.DataFrame()
-    
-    # Generate basic frame data with MAVLink packet sizes
-    frame_data = generate_frame_data(num_samples, 
-                                   packet_size_mean=config.common_mavlink_size)
-    for key, value in frame_data.items():
-        data[key] = value
-    
-    # Network layer features
-    data['ip.src'] = [f"192.168.{np.random.randint(1, 255)}.{np.random.randint(1, 255)}" 
-                      for _ in range(num_samples)]
-    data['ip.dst'] = [f"192.168.{np.random.randint(1, 255)}.{np.random.randint(1, 255)}" 
-                      for _ in range(num_samples)]
-    
-    # Initialize all fields with NaN
-    tcp_fields = ['tcp.srcport', 'tcp.dstport', 'tcp.flags', 'tcp.len', 
-                 'tcp.stream', 'tcp.seq', 'tcp.ack']
-    udp_fields = ['udp.srcport', 'udp.dstport', 'udp.length']
-    
-    for field in tcp_fields + udp_fields:
-        data[field] = pd.NA
-    
-    # Fill UDP fields for MAVLink traffic
-    data['udp.srcport'] = np.random.choice(config.mavlink_ports, num_samples)
-    data['udp.dstport'] = np.random.choice(config.mavlink_ports, num_samples)
-    data['udp.length'] = data['frame.len'] - 42  # UDP length = frame length - headers
-    
-    data['label'] = 0  # Normal traffic
-    return data
+            packet['frame.time_epoch'] = current_time
 
-def generate_mitm_attack(num_samples: int, config: ArduPilotConfig) -> pd.DataFrame:
-    """Generate synthetic MITM attack data for Ardupilot."""
-    data = pd.DataFrame()
-    
-    # Generate basic frame data
-    frame_data = generate_frame_data(num_samples, 
-                                   packet_size_mean=config.common_mavlink_size)
-    for key, value in frame_data.items():
-        data[key] = value
-    
-    # MITM attack on MAVLink communication
-    legitimate_ip = f"192.168.{np.random.randint(1, 255)}.{np.random.randint(1, 255)}"
-    attacker_ip = f"192.168.{np.random.randint(1, 255)}.{np.random.randint(1, 255)}"
-    
-    data['ip.src'] = [legitimate_ip if i % 2 == 0 else attacker_ip 
-                      for i in range(num_samples)]
-    data['ip.dst'] = [attacker_ip if i % 2 == 0 else legitimate_ip 
-                      for i in range(num_samples)]
-    
-    # Set all TCP fields to NaN
-    tcp_fields = ['tcp.srcport', 'tcp.dstport', 'tcp.flags', 'tcp.len', 
-                 'tcp.stream', 'tcp.seq', 'tcp.ack']
-    for field in tcp_fields:
-        data[field] = pd.NA
-    
-    # UDP fields targeting MAVLink ports
-    data['udp.srcport'] = np.random.choice(config.mavlink_ports, num_samples)
-    data['udp.dstport'] = np.random.choice(config.mavlink_ports, num_samples)
-    data['udp.length'] = data['frame.len'] - 42
-    
-    data['label'] = 1  # MITM attack
-    return data
+            # Set TCP fields
+            packet['tcp.flags'] = 'SYN'
+            packet['tcp.seq'] = seq_num
+            packet['tcp.ack'] = 0
+            packet['tcp.srcport'] = float(random.randint(1024, 65535))
+            packet['frame.len'] = 74
+            packet['tcp.len'] = float(0)
+            
+            # Clear UDP fields
+            packet['udp.srcport'] = np.nan
+            packet['udp.dstport'] = np.nan
+            packet['udp.length'] = np.nan
+            
+            packet = self._preserve_nan_columns(packet)
+            attack_packets.append(packet)
+            
+            current_time += packet_interval
+            seq_num += 1
+        
+        # Combine with input_df (which already has adjusted timestamps)
+        attack_df = pd.DataFrame(attack_packets)
+        return pd.concat([self.input_df, attack_df], ignore_index=True).sort_values('frame.time_epoch')
 
-def generate_dos_attack(num_samples: int, config: ArduPilotConfig) -> pd.DataFrame:
-    """Generate synthetic DoS attack data targeting Ardupilot."""
-    data = pd.DataFrame()
-    
-    # Generate basic frame data with flood characteristics
-    frame_data = generate_frame_data(num_samples, 
-                                   packet_size_mean=200,  # Smaller packets for flood
-                                   packet_size_std=20)
-    for key, value in frame_data.items():
-        data[key] = value
-    
-    # Target specific drone IP and port
-    target_ip = f"192.168.{np.random.randint(1, 255)}.{np.random.randint(1, 255)}"
-    data['ip.src'] = [f"192.168.{np.random.randint(1, 255)}.{np.random.randint(1, 255)}" 
-                      for _ in range(num_samples)]
-    data['ip.dst'] = [target_ip] * num_samples
-    
-    # Set all TCP fields to NaN
-    tcp_fields = ['tcp.srcport', 'tcp.dstport', 'tcp.flags', 'tcp.len', 
-                 'tcp.stream', 'tcp.seq', 'tcp.ack']
-    for field in tcp_fields:
-        data[field] = pd.NA
-    
-    # UDP flood targeting primary MAVLink port
-    data['udp.srcport'] = np.random.randint(1024, 65535, num_samples)
-    data['udp.dstport'] = [14550] * num_samples  # Target primary GCS port
-    data['udp.length'] = data['frame.len'] - 42
-    
-    data['label'] = 2  # DoS attack
-    return data
+class MITMAttackGenerator(BaseAttackGenerator):
+    def generate(self) -> pd.DataFrame:
+        """
+        Generate MITM attack traffic focusing on IP addresses and ports
+        """
+        mitm_packets = []
+        attacker_ip = self._generate_ip_address()
+        
+        for _, packet in self.input_df.iterrows():
+            # Original packet
+            original = packet.copy()
+            mitm_packets.append(original)
+            
+            # Only intercept packets with valid IP addresses
+            if pd.notna(packet['ip.src']) and pd.notna(packet['ip.dst']):
+                # Intercepted packet
+                intercepted = packet.copy()
+                # Set attack label
+                intercepted['label'] = 1
+                intercepted['ip.src'] = attacker_ip
+                intercepted['frame.time_epoch'] += 0.001  # 1ms delay
+                
+                # Modify TCP sequence numbers if present
+                if pd.notna(packet['tcp.seq']):
+                    intercepted['tcp.seq'] = float(random.randint(1000000, 9999999))
+                    intercepted['tcp.ack'] = float(random.randint(1000000, 9999999))
+                
+                # Preserve NaN columns
+                intercepted = self._preserve_nan_columns(intercepted)
+                
+                mitm_packets.append(intercepted)
+        
+        mitm_df = pd.DataFrame(mitm_packets)
+        return self._adjust_timestamps(mitm_df)
 
-def generate_port_scan_attack(num_samples: int, config: ArduPilotConfig) -> pd.DataFrame:
-    """Generate synthetic Port Scanning attack targeting Ardupilot ports."""
-    data = pd.DataFrame()
-    
-    # Generate basic frame data for scanning
-    frame_data = generate_frame_data(num_samples, 
-                                   packet_size_mean=60,  # Small packets for scanning
-                                   packet_size_std=5)
-    for key, value in frame_data.items():
-        data[key] = value
-    
-    # Targeting drone IP
-    target_ip = f"192.168.{np.random.randint(1, 255)}.{np.random.randint(1, 255)}"
-    data['ip.src'] = [f"192.168.{np.random.randint(1, 255)}.{np.random.randint(1, 255)}" 
-                      for _ in range(num_samples)]
-    data['ip.dst'] = [target_ip] * num_samples
-    
-    # Mix of UDP and TCP scanning
-    is_tcp = np.random.choice([True, False], num_samples, p=[0.7, 0.3])
-    data['_ws.col.protocol'] = ['TCP' if x else 'UDP' for x in is_tcp]
-    data['frame.protocols'] = ['eth:ethertype:ip:tcp' if x else 'eth:ethertype:ip:udp' 
-                              for x in is_tcp]
-    
-    # Initialize all fields with NaN
-    tcp_fields = ['tcp.srcport', 'tcp.dstport', 'tcp.flags', 'tcp.len', 
-                 'tcp.stream', 'tcp.seq', 'tcp.ack']
-    udp_fields = ['udp.srcport', 'udp.dstport', 'udp.length']
-    
-    for field in tcp_fields + udp_fields:
-        data[field] = pd.NA
-    
-    # Fill TCP scanning fields
-    data.loc[is_tcp, 'tcp.srcport'] = np.random.randint(50000, 60000, sum(is_tcp))
-    # Scan relevant ports for Ardupilot
-    scan_ports = list(range(14550, 14558)) + [5760] + list(range(1, 1024))
-    data.loc[is_tcp, 'tcp.dstport'] = np.random.choice(scan_ports, sum(is_tcp))
-    data.loc[is_tcp, 'tcp.flags'] = 'S'  # SYN scan
-    data.loc[is_tcp, 'tcp.len'] = 0
-    data.loc[is_tcp, 'tcp.stream'] = range(sum(is_tcp))
-    data.loc[is_tcp, 'tcp.seq'] = np.random.randint(0, 1000000000, sum(is_tcp))
-    data.loc[is_tcp, 'tcp.ack'] = 0
-    
-    # Fill UDP scanning fields
-    is_udp = ~is_tcp
-    data.loc[is_udp, 'udp.srcport'] = np.random.randint(50000, 60000, sum(is_udp))
-    data.loc[is_udp, 'udp.dstport'] = np.random.choice(scan_ports, sum(is_udp))
-    data.loc[is_udp, 'udp.length'] = data.loc[is_udp, 'frame.len'] - 42
-    
-    data['label'] = 3  # Port Scanning attack
-    return data
+class PortScanGenerator(BaseAttackGenerator):
+    def generate(self, ports_to_scan: int = 100) -> pd.DataFrame:
+        """
+        Generate port scanning traffic
+        
+        Args:
+            ports_to_scan: Number of ports to scan
+        """
+        # Select a target from existing legitimate traffic
+        target_row = self.input_df[pd.notna(self.input_df['ip.dst'])].sample(n=1).iloc[0]
+        
+        scan_packets = []
+        current_time = self.start_time
+        
+        # Generate SYN packets for port scanning
+        for port in range(1, ports_to_scan + 1):
+            packet = target_row.copy()
+            # Set attack label
+            packet['label'] = 1
+            packet['frame.time_epoch'] = current_time
+            
+            # Set TCP-specific fields
+            packet['tcp.dstport'] = float(port)
+            packet['tcp.srcport'] = float(random.randint(49152, 65535))
+            packet['tcp.flags'] = 'SYN'
+            packet['tcp.seq'] = float(random.randint(1000000, 9999999))
+            packet['tcp.ack'] = 0.0
+            packet['frame.len'] = 74
+            packet['tcp.len'] = 0.0
+            
+            # Clear UDP fields
+            packet['udp.srcport'] = np.nan
+            packet['udp.dstport'] = np.nan
+            packet['udp.length'] = np.nan
+            
+            # Preserve NaN columns
+            packet = self._preserve_nan_columns(packet)
+            
+            scan_packets.append(packet)
+            current_time += 0.1  # 100ms between scan packets
+        
+        scan_df = pd.DataFrame(scan_packets)
+        return pd.concat([self.input_df, scan_df], ignore_index=True).sort_values('frame.time_epoch')
 
 def main():
-    # Initialize configuration
-    config = ArduPilotConfig()
-    np.random.seed(config.seed)
+    parser = argparse.ArgumentParser(description='Generate synthetic network attack data')
+    parser.add_argument('input_file', help='Input CSV file path')
+    parser.add_argument('output_file', help='Output CSV file path')
+    parser.add_argument('attack_type', choices=['dos', 'mitm', 'portscan'], 
+                        help='Type of attack to generate')
+    parser.add_argument('--start-time', type=float, 
+                        help='Start time in epoch format (default: current time)')
+    parser.add_argument('--duration', type=int, default=300,
+                        help='Duration of attack in seconds (default: 300)')
     
-    print("Generating normal traffic...")
-    normal_data = generate_normal_traffic(config.normal_samples, config)
+    args = parser.parse_args()
     
-    print("Generating MITM attack traffic...")
-    mitm_data = generate_mitm_attack(config.attack_samples['mitm'], config)
-    
-    print("Generating DoS attack traffic...")
-    dos_data = generate_dos_attack(config.attack_samples['dos'], config)
-    
-    print("Generating Port Scan attack traffic...")
-    port_scan_data = generate_port_scan_attack(config.attack_samples['port_scan'], config)
-    
-    # Combine all data
-    combined_data = pd.concat(
-        [normal_data, mitm_data, dos_data, port_scan_data], 
-        ignore_index=True
-    )
-    
-    # Shuffle the dataset
-    combined_data = shuffle(combined_data, random_state=config.seed).reset_index(drop=True)
-    
-    # Save to CSV
-    combined_data.to_csv(config.output_file, index=False)
-    print(f"Synthetic Ardupilot network data has been saved to '{config.output_file}'")
-    
-    # Print dataset statistics
-    print("\nDataset Statistics:")
-    print(f"Total samples: {len(combined_data)}")
-    print("\nClass distribution:")
-    print(combined_data['label'].value_counts().sort_index())
-    print("\nProtocol distribution:")
-    print(combined_data['_ws.col.protocol'].value_counts())
+    try:
+        # Read input CSV
+        input_df = pd.read_csv(args.input_file)
+        
+        # Create appropriate generator based on attack type
+        generators = {
+            'dos': DoSAttackGenerator,
+            'mitm': MITMAttackGenerator,
+            'portscan': PortScanGenerator
+        }
+        
+        generator_class = generators[args.attack_type]
+        generator = generator_class(input_df, args.start_time)
+        
+        # Generate attack data
+        if args.attack_type == 'dos':
+            result_df = generator.generate(duration_seconds=args.duration)
+        elif args.attack_type == 'portscan':
+            result_df = generator.generate(ports_to_scan=1000)
+        else:
+            result_df = generator.generate()
+        
+        # Save to output file
+        result_df.to_csv(args.output_file, index=False)
+        print(f"Successfully generated {args.attack_type} attack data in {args.output_file}")
+        
+    except Exception as e:
+        print(f"Error: {str(e)}", file=sys.stderr)
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
