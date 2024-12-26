@@ -10,8 +10,8 @@
     <nav>
         <a href="{{ url_for('index') }}">Home</a> |
         <a href="{{ url_for('dashboard') }}">New Dashboard</a> |
-        <a href="{{ url_for('wifi_tab') }}">Wi-Fi Monitor</a> |
-        <a href="{{ url_for('mavlink_tab') }}">MAVLink Monitor</a>
+        <a href="{{ url_for('wifi') }}">Wi-Fi Monitor</a> |
+        <a href="{{ url_for('mavlink') }}">MAVLink Monitor</a>
     </nav>
     <div class="content">
         {% block content %}{% endblock %}

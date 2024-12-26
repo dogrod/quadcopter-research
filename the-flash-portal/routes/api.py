@@ -29,8 +29,7 @@ def mavlink():
 def toggle_wifi_monitor():
     if wifi_monitor.monitoring:
         print("Stopping wifi monitoring...")
-        wifi_monitor.stop_capture_event.set()
-        wifi_monitor.monitoring = False
+        wifi_monitor.stop_capture()
     else:
         print("Starting wifi monitoring...")
         wifi_monitor.stop_capture_event.clear()

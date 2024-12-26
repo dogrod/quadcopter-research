@@ -140,6 +140,43 @@
   .hidden {
     display: none;
   }
+
+  .threat-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .blocked-ips {
+    background-color: #fee2e2;
+    border: 1px solid #ef4444;
+  }
+
+  .recent-threats {
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+  }
+
+  .threat-item {
+    padding: 8px 12px;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .threat-level-high {
+    color: #dc2626;
+    font-weight: bold;
+  }
+
+  .threat-level-medium {
+    color: #d97706;
+    font-weight: bold;
+  }
 </style>
 <div class="dashboard">
   <!-- Wi-Fi Monitoring Card -->
@@ -180,6 +217,33 @@
         <div class="stat-box">
           <div class="stat-label">Traffic Logs</div>
           <div id="trafficCount" class="stat-value">0</div>
+        </div>
+      </div>
+      <div class="card-section">
+        <h3>Threat Monitor</h3>
+        <div class="threat-stats">
+          <div class="stat-box">
+            <div class="stat-label">Low Threats</div>
+            <div id="lowThreats" class="stat-value">0</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">Medium Threats</div>
+            <div id="mediumThreats" class="stat-value">0</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">High Threats</div>
+            <div id="highThreats" class="stat-value">0</div>
+          </div>
+        </div>
+
+        <h3>Blocked IPs</h3>
+        <div id="blockedIPs" class="ip-list blocked-ips">
+          <!-- Blocked IPs will be listed here -->
+        </div>
+
+        <h3>Recent Threats</h3>
+        <div id="recentThreats" class="recent-threats">
+          <!-- Recent threats will be listed here -->
         </div>
       </div>
     </div>
@@ -251,6 +315,14 @@
     messageCount: document.getElementById("messageCount"),
   };
 
+  const threatElements = {
+    lowThreats: document.getElementById("lowThreats"),
+    mediumThreats: document.getElementById("mediumThreats"),
+    highThreats: document.getElementById("highThreats"),
+    blockedIPs: document.getElementById("blockedIPs"),
+    recentThreats: document.getElementById("recentThreats"),
+  };
+
   // Update UI functions
   function updateWifiUI() {
     elements.wifiToggle.textContent = state.wifi.isMonitoring
@@ -303,6 +375,43 @@
       .join("");
 
     updateWifiUI();
+  });
+
+  // Add this to your socket event handlers
+  wifiSocket.on("threat_stats", (data) => {
+    threatElements.lowThreats.textContent = data.threat_counts.low;
+    threatElements.mediumThreats.textContent = data.threat_counts.medium;
+    threatElements.highThreats.textContent = data.threat_counts.high;
+
+    // Update blocked IPs
+    threatElements.blockedIPs.innerHTML = data.blocked_ips
+      .map((ip) => `<div class="ip-item">${ip}</div>`)
+      .join("");
+
+    // Update recent threats
+    threatElements.recentThreats.innerHTML = data.recent_threats
+      .map(
+        (threat) => `
+      <div class="threat-item">
+        <span>${threat.source_ip}</span>
+        <span class="threat-level-${threat.threat_level}">
+          ${threat.threat_level.toUpperCase()}
+        </span>
+      </div>
+    `
+      )
+      .join("");
+  });
+
+  wifiSocket.on("ip_blocked", (data) => {
+    // Optional: Show a notification when an IP is blocked
+    const notification = document.createElement("div");
+    notification.className = "notification notification-warning";
+    notification.textContent = `Blocked IP ${
+      data.ip
+    } (Score: ${data.score.toFixed(2)})`;
+    document.body.appendChild(notification);
+    setTimeout(() => notification.remove(), 5000);
   });
 
   mavlinkSocket.on("mavlink_status", (data) => {
