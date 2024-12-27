@@ -1,6 +1,39 @@
-# Quadcopter Research
+# Enhancing Security and Safety in Quadcopter Drones through Unsupervised Machine Learning
 
-> This repository contains the research and development of my master degree project. The main goal of this project is to develop a ML model to ensure the security and safety of the quadcopter.
+> An unsupervised machine learning based anomaly detection system for drone security monitoring. The system is designed to detect network-based attacks and sensor anomalies in real-time using a custom drone platform.
+
+## Features
+
+- Real-time monitoring of network traffic and sensor data
+- Detection of network-based attacks including:
+  - Man-in-the-Middle (MITM) attacks
+  - Denial of Service (DoS) attacks
+  - Port scanning
+- Detection of sensor anomalies including:
+  - GPS spoofing
+  - Rangefinder data manipulation
+- Automated response mechanisms for detected threats
+- Web-based monitoring interface
+
+## System Requirements
+
+### Hardware
+
+- Pixhawk 6C flight controller
+- Raspberry Pi 4B (4GB RAM)
+- ESP8266 Wi-Fi module
+- Holybro M10 GPS module
+- Lightware SF45/B rangefinder
+- Power module (Holybro PM02)
+- Additional components listed in hardware specification document
+
+### Software
+
+- Raspberry Pi OS (64-bit)
+- Python 3.9+
+- MAVLink protocol libraries
+- QGroundControl
+- ArduPilot firmware
 
 ## The Flash Portal
 
