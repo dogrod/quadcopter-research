@@ -277,10 +277,46 @@
         >Disconnected</span
       >
     </div>
-    <div class="stat-box">
+    <div id="mavlinkContent" class="hidden">
+      <div class="stats-grid">
+        <div class="stat-box">
+          <div class="stat-label">Total Messages</div>
+          <div id="messageCount" class="stat-value">0</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Anomalies Detected</div>
+          <div id="anomalyCount" class="stat-value">0</div>
+        </div>
+      </div>
+
+      <div class="card-section">
+        <h3>Sensor Health</h3>
+        <div class="sensor-stats">
+          <div class="stat-box">
+            <div class="stat-label">GPS Status</div>
+            <div id="gpsStatus" class="status-badge status-active">Normal</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">Position Hold</div>
+            <div id="holdStatus" class="status-badge status-inactive">Inactive</div>
+          </div>
+        </div>
+
+        <h3>Recent Anomalies</h3>
+        <div id="recentAnomalies" class="recent-threats">
+          <!-- Recent anomalies will be listed here -->
+        </div>
+
+        <h3>Command History</h3>
+        <div id="commandHistory" class="recent-threats">
+          <!-- Command history will be listed here -->
+        </div>
+      </div>
+    </div>
+    <!-- <div class="stat-box">
       <div class="stat-label">Total Messages</div>
       <div id="messageCount" class="stat-value">0</div>
-    </div>
+    </div> -->
   </div>
 </div>
 
@@ -299,6 +335,13 @@
     mavlink: {
       isConnected: false,
       messageCount: 0,
+      anomalyCount: 0,
+      recentAnomalies: [],
+      commandHistory: [],
+      sensorStatus: {
+        gps: 'normal'
+      },
+      holdActive: false
     },
   };
 
@@ -343,6 +386,7 @@
   }
 
   function updateMavlinkUI() {
+    // Update status and content visibility
     elements.mavlinkToggle.textContent = state.mavlink.isConnected
       ? "Stop Monitor"
       : "Start Monitor";
@@ -355,7 +399,50 @@
     elements.mavlinkStatus.className = `status-badge ${
       state.mavlink.isConnected ? "status-active" : "status-inactive"
     }`;
+    elements.mavlinkContent.className = state.mavlink.isConnected ? "" : "hidden";
+    
+    // Update counters
     elements.messageCount.textContent = state.mavlink.messageCount;
+    elements.anomalyCount.textContent = state.mavlink.anomalyCount;
+    
+    // Update GPS status
+    elements.gpsStatus.textContent = state.mavlink.sensorStatus.gps.toUpperCase();
+    elements.gpsStatus.className = `status-badge ${
+      state.mavlink.sensorStatus.gps === 'normal' ? 'status-active' : 'status-inactive'
+    }`;
+
+    // Update hold status
+    elements.holdStatus.textContent = state.mavlink.holdActive ? 'Active' : 'Inactive';
+    elements.holdStatus.className = `status-badge ${
+      state.mavlink.holdActive ? 'status-active' : 'status-inactive'
+    }`;
+
+    // Update recent anomalies list
+    elements.recentAnomalies.innerHTML = state.mavlink.recentAnomalies
+      .map(anomaly => `
+        <div class="anomaly-item">
+          <span>${anomaly.sensor} (${new Date(anomaly.timestamp).toLocaleTimeString()})</span>
+          <span class="anomaly-score ${
+            anomaly.score > anomaly.threshold * 1.1 
+              ? 'anomaly-score-high' 
+              : 'anomaly-score-medium'
+          }">
+            Score: ${anomaly.score.toFixed(2)}
+          </span>
+        </div>
+      `)
+      .join('');
+
+    // Update command history
+    elements.commandHistory.innerHTML = state.mavlink.commandHistory
+      .map(cmd => `
+        <div class="command-item">
+          <span>${new Date(cmd.timestamp).toLocaleTimeString()}</span>
+          <span class="command-type">${cmd.type}</span>
+          ${cmd.reason ? `<span>(${cmd.reason})</span>` : ''}
+        </div>
+      `)
+      .join('');
   }
 
   // Socket event handlers
@@ -423,6 +510,77 @@
     state.mavlink.messageCount = data.count;
     updateMavlinkUI();
   });
+
+  mavlinkSocket.on("mavlink_anomaly", (data) => {
+    // Increment anomaly count
+    state.mavlink.anomalyCount++;
+    
+    // Update sensor status if needed
+    if (data.sensor === 'gps') {
+      state.mavlink.sensorStatus.gps = data.score > data.threshold * 1.1 ? 'critical' : 'warning';
+    }
+    
+    // Add to recent anomalies
+    state.mavlink.recentAnomalies.push({
+      sensor: data.sensor,
+      score: data.score, 
+      threshold: data.threshold,
+      timestamp: data.timestamp
+    });
+    
+    // Keep only last 10 anomalies
+    if (state.mavlink.recentAnomalies.length > 10) {
+      state.mavlink.recentAnomalies.shift();
+    }
+    
+    updateMavlinkUI();
+  });
+
+  mavlinkSocket.on("mavlink_hold_position", (data) => {
+    // Update hold position status
+    state.mavlink.holdActive = true;
+    
+    // Add to command history
+    state.mavlink.commandHistory.push({
+      type: 'HOLD_POSITION',
+      reason: data.reason,
+      timestamp: data.timestamp
+    });
+    
+    // Keep only last 10 commands
+    if (state.mavlink.commandHistory.length > 10) {
+      state.mavlink.commandHistory.shift();
+    }
+    
+    updateMavlinkUI();
+    
+    // Reset hold status after 5 seconds for demo purposes
+    // In real implementation this should be driven by vehicle status
+    setTimeout(() => {
+      state.mavlink.holdActive = false;
+      updateMavlinkUI();
+    }, 5000);
+  });
+
+  mavlinkSocket.on("mavlink_error", (data) => {
+    console.error("MAVLink error:", data.message);
+    // Optionally show error to user
+    const notification = document.createElement("div");
+    notification.className = "notification notification-error";
+    notification.textContent = `MAVLink Error: ${data.message}`;
+    document.body.appendChild(notification);
+    setTimeout(() => notification.remove(), 5000);
+  });
+
+  // Function to format data for UI display
+  function formatMavlinkData(data) {
+    // Helper function to format data for display
+    // Add any needed data transformations here
+    return {
+      ...data,
+      timestamp: new Date(data.timestamp).toLocaleTimeString()
+    };
+  }
 
   // Button click handlers
   elements.wifiToggle.addEventListener("click", async () => {
